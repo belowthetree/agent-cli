@@ -5,8 +5,8 @@ use futures::StreamExt;
 use futures::pin_mut;
 mod config;
 mod chat;
-mod mcp;
 mod client;
+mod mcp;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -24,6 +24,7 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let mut builder = Builder::from_default_env();
     builder.init();
+    mcp::init().await;
     let args = Args::parse();
     let config = config::Config::local().unwrap();
     let mut chat = chat::Chat::new(config);

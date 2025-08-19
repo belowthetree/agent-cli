@@ -31,6 +31,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "toml",

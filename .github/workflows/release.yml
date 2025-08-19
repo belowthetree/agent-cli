@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'src/**'  # 仅监控src目录下的文件变动
 
 jobs:
   build:

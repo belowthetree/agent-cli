@@ -75,13 +75,7 @@ pub struct Config {
 impl Config {
     pub fn local() -> Result<Self, Box<dyn std::error::Error>> {
         let config_content = fs::read_to_string("config.toml").expect("找不到 config.toml 文件");
-
         let config_file: Self = toml::from_str(&config_content)?;
-
-        Ok(Config {
-            mcp: None,
-            deepseek_key: config_file.deepseek_key,
-            deepseek_base_url: config_file.deepseek_base_url,
-        })
+        Ok(config_file)
     }
 }

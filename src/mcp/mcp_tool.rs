@@ -38,7 +38,7 @@ impl Tool for McpTool {
 
     type Error = McpError;
 
-    type Args = String;
+    type Args = serde_json::Value;
 
     type Output = String;
 
@@ -50,14 +50,17 @@ impl Tool for McpTool {
         })
     }
 
-    fn call(
+    async fn call(
         &self,
         args: Self::Args,
-    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + Sync {
+    ) -> Result<Self::Output, Self::Error> {
         let server_name = self.server_name.clone();
         let tool_name = self.name.clone();
-        let result = McpManager::global().call_tool(&server_name, &tool_name, &args);
-        future::ready(result.map_err(|e| McpError{text: e.to_string()}))
+        let result = tokio::task::block_in_place(move || {
+            McpManager::global().call_tool(&server_name, &tool_name, &args)
+        });
+        println!("工具调用返回 {:?}", result);
+        result.map_err(|e| McpError{text: e.to_string()})
     }
 
     // 获取名字，重名的需要伪造一个名字

@@ -9,6 +9,7 @@ use crate::config;
 pub async fn init() {
     let config = config::Config::local().unwrap();
     if config.mcp.is_none() {
+        println!("没有 mcp");
         return;
     }
     let mcp = config.mcp.unwrap();

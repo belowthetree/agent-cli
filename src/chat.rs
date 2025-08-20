@@ -1,5 +1,6 @@
 use crate::client::chat_client::{ChatClient, ChatResult, StreamedChatResponse};
 use crate::config::Config;
+use crate::mcp::McpManager;
 use futures::Stream;
 use rig::message::{AssistantContent, Message, Text};
 use rig::OneOrMany;
@@ -12,7 +13,7 @@ pub struct Chat {
 impl Chat {
     pub fn new(config: Config) -> Self {
         Self {
-            client: ChatClient::new(config.deepseek_key),
+            client: ChatClient::new(config.deepseek_key, McpManager::global().get_all_tools()),
             context: vec![],
         }
     }
@@ -23,11 +24,11 @@ impl Chat {
         Ok(resp)
     }
 
-    pub fn stream_chat(
-        &mut self,
-        prompt: &str,
-    ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        self.client
-            .stream_chat(prompt, self.context.clone())
-    }
+    // pub fn stream_chat(
+    //     &mut self,
+    //     prompt: &str,
+    // ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
+    //     self.client
+    //         .stream_chat(prompt, self.context.clone())
+    // }
 }

@@ -1,26 +1,19 @@
-use rig::tool::{ToolSet, Tool};
-use rig::completion::ToolDefinition;
+use rmcp::model::Tool;
 use serde::{Deserialize, Serialize};
 use futures::{future, TryFutureExt};
-
-use crate::config::McpServerTransportConfig;
 use crate::mcp::McpManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpTool {
-    name: String,
-    pub description: String,
-    pub input_schema: serde_json::Value,
+    tool: Tool,
     server_name: String,
     use_fake_name: bool,
 }
 
 impl McpTool {
-    pub fn new(name: String, description: String, input_schema: serde_json::Value, server_name: String, use_fake_name: bool) -> Self {
+    pub fn new(tool: Tool, server_name: String, use_fake_name: bool) -> Self {
         Self {
-            name,
-            description,
-            input_schema,
+            tool,
             server_name,
             use_fake_name,
         }
@@ -33,42 +26,23 @@ pub struct McpError {
     text: String,
 }
 
-impl Tool for McpTool {
-    const NAME: &'static str = "McpTool";
-
-    type Error = McpError;
-
-    type Args = serde_json::Value;
-
-    type Output = String;
-
-    fn definition(&self, _prompt: String) -> impl Future<Output = ToolDefinition> + Send + Sync {
-        future::ready(ToolDefinition{
-            name: self.name(),
-            description: self.description.clone(),
-            parameters: self.input_schema.clone(),
-        })
-    }
-
-    async fn call(
-        &self,
-        args: Self::Args,
-    ) -> Result<Self::Output, Self::Error> {
-        let server_name = self.server_name.clone();
-        let tool_name = self.name.clone();
-        let result = tokio::task::block_in_place(move || {
-            McpManager::global().call_tool(&server_name, &tool_name, &args)
-        });
-        println!("工具调用返回 {:?}", result);
-        result.map_err(|e| McpError{text: e.to_string()})
+impl McpTool {
+    pub fn get_tool(&self)->Tool {
+        self.tool.clone()
     }
 
     // 获取名字，重名的需要伪造一个名字
-    fn name(&self) -> String {
-        let mut name = self.name.clone();
+    pub fn name(&self) -> String {
+        let mut name = self.tool.name.to_string();
         if self.use_fake_name {
             name = self.server_name.clone() + "_" + name.as_str();
         }
         name
+    }
+}
+
+impl Into<Tool> for McpTool{
+    fn into(self) -> Tool {
+        self.tool
     }
 }

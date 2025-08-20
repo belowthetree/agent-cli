@@ -1,7 +1,8 @@
+use std::env;
+use std::fs::File;
 use std::io::{self, Write};
 use std::process::exit;
 use clap::{command, Parser};
-use env_logger::Builder;
 use futures::StreamExt;
 use futures::pin_mut;
 
@@ -11,6 +12,7 @@ mod chat;
 mod client;
 mod mcp;
 mod model;
+mod connection;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -26,8 +28,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut builder = Builder::from_default_env();
-    builder.init();
+    log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
+
     mcp::init().await;
     let args = Args::parse();
     let config = config::Config::local().unwrap();

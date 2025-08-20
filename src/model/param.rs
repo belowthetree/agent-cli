@@ -13,13 +13,54 @@ pub struct ModelMessage {
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
+impl ModelMessage {
+    pub fn user(content: String)->Self {
+        Self {
+            role: "user".into(),
+            content,
+            name: "".into(),
+            tool_call_id: "".into(),
+            tool_calls: None,
+        }
+    }
+
+    pub fn assistant(content: String, think: String, tool_calls: Vec<ToolCall>)->Self {
+        Self {
+            role: "assistant".into(),
+            content: think + content.as_str(),
+            name: "".into(),
+            tool_call_id: "".into(),
+            tool_calls: Some(tool_calls),
+        }
+    }
+
+    pub fn system(content: String)->Self {
+        Self {
+            role: "system".into(),
+            content,
+            name: "".into(),
+            tool_call_id: "".into(),
+            tool_calls: None,
+        }
+    }
+
+    pub fn tool(content: String, tool: ToolCall)->Self {
+        Self {
+            role: "tool".into(),
+            content,
+            name: tool.function.name,
+            tool_call_id: tool.id,
+            tool_calls: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInputParam {
-    pub content: Option<String>,
     pub system: Option<String>,
     pub temperature: Option<f64>,
     pub tools: Option<Vec<Tool>>,
-    pub messages: Option<Vec<ModelMessage>>,
+    pub messages: Vec<ModelMessage>,
 }
 
 fn _default_tool_call_function() -> ToolCallFunction {

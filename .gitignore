@@ -1,3 +1,5 @@
 .vscode
 /target
 config.toml
+*.log
+/log

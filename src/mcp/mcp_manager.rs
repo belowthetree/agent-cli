@@ -1,8 +1,6 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
-use log::{info, log, warn};
-use rig::tool::Tool;
+use log::{info, warn};
 use anyhow::Result;
 use serde_json::Value;
 
@@ -31,12 +29,9 @@ impl McpManager {
         let tools = service.list_all_tools().await?;
         let mut self_tools = self.tools.lock().map_err(|e| anyhow::anyhow!("解锁 tools 失败 {}", e))?;
         for tool in tools.iter() {
-            info!("{:?}", tool);
             // 添加工具顺便检查有无重名
             let mcptool = McpTool::new(
-                tool.name.to_string(),
-                tool.description.clone().unwrap_or(std::borrow::Cow::Borrowed("")).to_string(),
-                Value::Object(tool.input_schema.as_ref().clone()),
+                tool.clone(),
                 server_name.clone(),
                 self_tools.contains_key(&tool.name.to_string())
             );
@@ -83,7 +78,7 @@ impl McpManager {
                 return Err(anyhow::anyhow!("不存在这个 mcp 服务：{}", server_name));
             }
         }
-        
+
         // Convert the Value to a Map if it's an Object, otherwise create an empty map
         let arguments_map = if let Value::Object(obj) = param {
             obj.clone()

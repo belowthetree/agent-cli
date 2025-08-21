@@ -68,8 +68,8 @@ impl McpManager {
         res
     }
 
-    pub fn call_tool(&self, server_name: &str, tool_name: &str, param: &serde_json::Value)->Result<String> {
-        println!("调用工具 {} {} {:?}", server_name, tool_name, param);
+    pub async fn call_tool(&self, server_name: &str, tool_name: &str, param: &serde_json::Value)->Result<String> {
+        info!("调用工具 {} {} {:?}", server_name, tool_name, param);
         let transport;
         {
             let services = self.services.lock().map_err(|e| anyhow::anyhow!("Failed to lock tool services: {}", e))?;
@@ -85,38 +85,36 @@ impl McpManager {
         } else {
             serde_json::Map::new()
         };
-        
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            if let Ok(service) = transport.unwrap().start().await {
-                let result = service.call_tool(rmcp::model::CallToolRequestParam {
-                    name: std::borrow::Cow::Owned(tool_name.to_string()),
-                    arguments: Some(arguments_map),
-                }).await?;
-                let mut res = String::new();
-                if result.content.len() <= 0 {
-                    return Ok("".to_string())
-                }
-                for v in result.content.iter() {
-                    match &v.raw {
-                        rmcp::model::RawContent::Text(raw_text_content) => {
-                            res += raw_text_content.text.as_str();
-                        },
-                        rmcp::model::RawContent::Image(_) => {
-                            warn!("无法处理的 mcp tool 返回类型：图片");
-                        },
-                        rmcp::model::RawContent::Resource(_) => {
-                            warn!("无法处理的 mcp tool 返回类型：嵌入资源");
-                        },
-                        rmcp::model::RawContent::Audio(_) => {
-                            warn!("无法处理的 mcp tool 返回类型：音频");
-                        },
-                    }
-                }
-                Ok(res)
-            } else {
-                Err(anyhow::anyhow!("连接 mcp 服务 {} 失败", server_name))
+
+        if let Ok(service) = transport.unwrap().start().await {
+            let result = service.call_tool(rmcp::model::CallToolRequestParam {
+                name: std::borrow::Cow::Owned(tool_name.to_string()),
+                arguments: Some(arguments_map),
+            }).await?;
+            info!("调用工具 {} {} 结果 {:?}", server_name, tool_name, result);
+            let mut res = String::new();
+            if result.content.len() <= 0 {
+                return Ok("".to_string())
             }
-        })
+            for v in result.content.iter() {
+                match &v.raw {
+                    rmcp::model::RawContent::Text(raw_text_content) => {
+                        res += raw_text_content.text.as_str();
+                    },
+                    rmcp::model::RawContent::Image(_) => {
+                        warn!("无法处理的 mcp tool 返回类型：图片");
+                    },
+                    rmcp::model::RawContent::Resource(_) => {
+                        warn!("无法处理的 mcp tool 返回类型：嵌入资源");
+                    },
+                    rmcp::model::RawContent::Audio(_) => {
+                        warn!("无法处理的 mcp tool 返回类型：音频");
+                    },
+                }
+            }
+            Ok(res)
+        } else {
+            Err(anyhow::anyhow!("连接 mcp 服务 {} 失败", server_name))
+        }
     }
 }

@@ -39,6 +39,11 @@ impl McpTool {
         }
         name
     }
+
+    // 获取服务器名称
+    pub fn server_name(&self) -> &str {
+        &self.server_name
+    }
 }
 
 impl Into<Tool> for McpTool{

@@ -5,6 +5,7 @@ use crate::{connection::CommonConnectionContent, mcp::McpTool, model::{deepseek,
 
 pub struct ChatClient {
     pub agent: deepseek::DeepseekModel,
+    system: String,
     tools: Vec<McpTool>
 }
 
@@ -23,10 +24,11 @@ pub enum StreamedChatResponse {
 }
 
 impl ChatClient {
-    pub fn new(key: String, tools: Vec<McpTool>) -> Self {
+    pub fn new(key: String, system: String, tools: Vec<McpTool>) -> Self {
         let agent = deepseek::DeepseekModel::new("https://api.deepseek.com/chat/completions".into(), "deepseek-chat".into(), key);
         Self {
             agent,
+            system,
             tools,
         }
     }
@@ -36,9 +38,13 @@ impl ChatClient {
         for tool in self.tools.iter() {
             tools.push(tool.clone().into());
         }
-        chat_history.push(ModelMessage::user(prompt.to_string()));
+        if self.system.len() > 0 {
+            chat_history.push(ModelMessage::system(self.system.to_string()));
+        }
+        if prompt.len() > 0 {
+            chat_history.push(ModelMessage::user(prompt.to_string()));
+        }
         let param = ModelInputParam{
-            system: None,
             temperature: None,
             tools: Some(tools),
             messages: chat_history,
@@ -69,7 +75,6 @@ impl ChatClient {
                 tools.push(tool.clone().into());
             }
             let param = ModelInputParam{
-                system: None,
                 temperature: None,
                 tools: Some(tools),
                 messages: chat_history,
@@ -107,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ChatClient::new("".to_string(), vec![]);
+        let client = ChatClient::new("".to_string(), "".into(), vec![]);
         let stream = client.stream_chat("测试消息", vec![]);
         pin_mut!(stream);
 

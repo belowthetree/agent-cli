@@ -1,6 +1,8 @@
 use futures::Stream;
 use serde_json::Value;
+use std::cmp::max;
 use std::collections::HashMap;
+use std::usize::MAX;
 
 use crate::client::chat_client::{ChatClient, ChatResult, StreamedChatResponse};
 use crate::config::Config;
@@ -11,6 +13,7 @@ pub struct Chat {
     pub client: ChatClient,
     pub context: Vec<ModelMessage>,
     tool_map: HashMap<String, String>, // 工具名称 -> 服务器名称映射
+    max_tool_try: usize,
 }
 
 impl Chat {
@@ -24,17 +27,20 @@ impl Chat {
         }
         
         Self {
-            client: ChatClient::new(config.deepseek_key, tools),
+            client: ChatClient::new(config.deepseek_key, "你是一个优秀的助理，你擅长替人解决问题，必要时可以灵活使用工具".into(), tools),
             context: vec![],
             tool_map,
+            max_tool_try: max(config.max_tool_try, 3),
         }
     }
 
     pub async fn chat(&mut self, prompt: &str) -> anyhow::Result<ChatResult> {
-        let resp = self.client.chat(prompt, self.context.clone()).await;
+        let mut resp = self.client.chat(prompt, self.context.clone()).await;
         
-        // 执行工具调用
-        if !resp.tool_calls.is_empty() {
+        // 执行工具循环调用
+        let remain = self.max_tool_try;
+        while remain > 0 && resp.tool_calls.len() > 0 {
+            self.context.push(ModelMessage::assistant(resp.content, resp.think, resp.tool_calls.clone()));
             for tool_call in &resp.tool_calls {
                 // 解析工具调用参数
                 let arguments: Value = serde_json::from_str(&tool_call.function.arguments)
@@ -62,6 +68,7 @@ impl Chat {
                     ));
                 }
             }
+            resp = self.client.chat("", self.context.clone()).await;
         }
 
         let t = resp.clone();

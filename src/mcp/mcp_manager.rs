@@ -79,7 +79,7 @@ impl McpManager {
             }
         }
 
-        // Convert the Value to a Map if it's an Object, otherwise create an empty map
+        // 创建一个参数 map
         let arguments_map = if let Value::Object(obj) = param {
             obj.clone()
         } else {

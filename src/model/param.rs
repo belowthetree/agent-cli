@@ -57,7 +57,6 @@ impl ModelMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInputParam {
-    pub system: Option<String>,
     pub temperature: Option<f64>,
     pub tools: Option<Vec<Tool>>,
     pub messages: Vec<ModelMessage>,

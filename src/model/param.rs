@@ -5,6 +5,7 @@ use rmcp::model::Tool;
 pub struct ModelMessage {
     pub role: String,
     pub content: String,
+    pub think: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -18,6 +19,7 @@ impl ModelMessage {
         Self {
             role: "user".into(),
             content,
+            think: "".into(),
             name: "".into(),
             tool_call_id: "".into(),
             tool_calls: None,
@@ -27,7 +29,8 @@ impl ModelMessage {
     pub fn assistant(content: String, think: String, tool_calls: Vec<ToolCall>)->Self {
         Self {
             role: "assistant".into(),
-            content: think + content.as_str(),
+            content,
+            think: "".into(),
             name: "".into(),
             tool_call_id: "".into(),
             tool_calls: Some(tool_calls),
@@ -38,6 +41,7 @@ impl ModelMessage {
         Self {
             role: "system".into(),
             content,
+            think: "".into(),
             name: "".into(),
             tool_call_id: "".into(),
             tool_calls: None,
@@ -48,6 +52,7 @@ impl ModelMessage {
         Self {
             role: "tool".into(),
             content,
+            think: "".into(),
             name: tool.function.name,
             tool_call_id: tool.id,
             tool_calls: None,

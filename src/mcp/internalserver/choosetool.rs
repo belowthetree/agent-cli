@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use rmcp::model::{Annotated, CallToolResult, RawContent, RawTextContent, Tool};
 use serde_json::{Map, Value};
 
@@ -8,8 +9,9 @@ use crate::mcp::internalserver::InternalTool;
 #[derive(Debug)]
 pub struct ChooseTool;
 
+#[async_trait]
 impl InternalTool for ChooseTool {
-    fn call(&self, args: Map<String, Value>)->anyhow::Result<CallToolResult> {
+    async fn call(&self, args: Map<String, Value>)->anyhow::Result<CallToolResult> {
         Ok(CallToolResult {
             content: vec![Annotated::new(
                 RawContent::Text(RawTextContent {
@@ -24,7 +26,7 @@ impl InternalTool for ChooseTool {
 
     fn get_mcp_tool(&self)->Tool {
         Tool{
-            name: "SelectTool".into(),
+            name: "choose_tool".into(),
             description: Some("Tell system and user the most appropriate tools should be use".into()),
             input_schema: serde_json::from_str(
                 r#"

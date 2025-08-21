@@ -1,4 +1,3 @@
-use std::env;
 use std::fs::File;
 use std::io::{self, Write};
 use std::process::exit;
@@ -6,6 +5,8 @@ use clap::{command, Parser};
 use futures::StreamExt;
 use futures::pin_mut;
 
+use crate::mcp::internalserver::getbesttool::GetBestTool;
+use crate::mcp::internalserver::InternalTool;
 use crate::mcp::{mcp_manager, McpManager};
 mod config;
 mod chat;
@@ -33,7 +34,11 @@ async fn main() -> anyhow::Result<()> {
     mcp::init().await;
     let args = Args::parse();
     let config = config::Config::local().unwrap();
-    let mut chat = chat::Chat::new(config);
+    let mut map = serde_json::Map::new();
+    map.insert("tool_description".into(), serde_json::Value::String("能够推送仓库到远程的工具".into()));
+    let res = GetBestTool.call(map).await;
+    println!("{:?}", res);
+    // let mut chat = chat::Chat::new(config, "你是一个优秀的助理，你擅长替人解决问题，必要时可以灵活使用工具".into());
     // let res = chat.chat(&args.prompt).await;
     // println!("{:?}", res);
     // let stream = chat.stream_chat(&args.prompt);

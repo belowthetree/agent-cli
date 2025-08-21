@@ -1,12 +1,17 @@
 use async_stream::stream;
 use futures::{Stream, StreamExt};
+use rmcp::model::Tool;
+use serde_json::Value;
+use tokio::runtime::Runtime;
 
-use crate::{connection::CommonConnectionContent, mcp::McpTool, model::{deepseek, param::{ModelInputParam, ModelMessage, ToolCall}, AgentModel}};
+use crate::{connection::CommonConnectionContent, mcp::{McpManager, McpTool}, model::{deepseek, param::{ModelInputParam, ModelMessage, ToolCall}, AgentModel}};
 
 pub struct ChatClient {
     pub agent: deepseek::DeepseekModel,
     system: String,
-    tools: Vec<McpTool>
+    tools: Vec<McpTool>,
+    using_tool: bool,
+    max_tool_loop: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -24,20 +29,26 @@ pub enum StreamedChatResponse {
 }
 
 impl ChatClient {
-    pub fn new(key: String, system: String, tools: Vec<McpTool>) -> Self {
+    pub fn new(key: String, system: String, tools: Vec<McpTool>, max_tool_loop: usize) -> Self {
         let agent = deepseek::DeepseekModel::new("https://api.deepseek.com/chat/completions".into(), "deepseek-chat".into(), key);
         Self {
             agent,
             system,
             tools,
+            using_tool: false,
+            max_tool_loop,
         }
     }
 
-    pub async fn chat(&self, prompt: &str, mut chat_history: Vec<ModelMessage>) -> ChatResult {
+    pub async fn chat(&mut self, prompt: &str, chat_history: Vec<ModelMessage>) -> anyhow::Result<Vec<ModelMessage>> {
         let mut tools = Vec::new();
         for tool in self.tools.iter() {
             tools.push(tool.clone().into());
         }
+        self.chat_with_tools(prompt, chat_history, &tools).await
+    }
+
+    pub async fn chat_with_tools(&mut self, prompt: &str, mut chat_history: Vec<ModelMessage>, tools: &Vec<Tool>)->anyhow::Result<Vec<ModelMessage>> {
         if self.system.len() > 0 {
             chat_history.push(ModelMessage::system(self.system.to_string()));
         }
@@ -46,10 +57,10 @@ impl ChatClient {
         }
         let param = ModelInputParam{
             temperature: None,
-            tools: Some(tools),
-            messages: chat_history,
+            tools: Some(tools.clone()),
+            messages: chat_history.clone(),
         };
-        let res = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e)).unwrap();
+        let res = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
         let mut tool_calls = Vec::new();
         let content = String::new();
         let think = String::new();
@@ -58,11 +69,14 @@ impl ChatClient {
                 tool_calls.push(tool.clone());
             }
         }
-        ChatResult {
-            content,
-            tool_calls,
-            think,
+        let mut res = Vec::new();
+        res.push(ModelMessage::assistant(content, think, tool_calls.clone()));
+        if !self.using_tool {
+            self.using_tool = true;
+            self.tool_call(tool_calls, self.max_tool_loop, &mut chat_history)?;
+            self.using_tool = false;
         }
+        Ok(res)
     }
 
     pub fn stream_chat(&self, prompt: &str, mut chat_history: Vec<ModelMessage>)-> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
@@ -102,6 +116,52 @@ impl ChatClient {
             }
         }
     }
+
+    // 执行工具循环调用
+    fn tool_call(&mut self, tool_calls: Vec<ToolCall>, remain_loop: usize, messages: &mut Vec<ModelMessage>)->anyhow::Result<()> {
+        if remain_loop <= 0 || tool_calls.len() <= 0 {
+            return Ok(());
+        }
+        
+        // 创建运行时来执行异步操作
+        let rt = Runtime::new().map_err(|e| anyhow::anyhow!("Failed to create runtime: {}", e))?;
+        
+        messages.push(ModelMessage::assistant("".into(), "".into(), tool_calls.clone()));
+        for tool_call in tool_calls {
+            // 解析工具调用参数
+            let arguments: Value = serde_json::from_str(&tool_call.function.arguments)
+                .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+            // 调用工具（阻塞执行）
+            let tool_result = rt.block_on(McpManager::global().call_tool(
+                &tool_call.function.name,
+                &arguments
+            ));
+            println!("{:?}", tool_result);
+            // 将工具调用结果添加到上下文
+            if let Ok(result) = tool_result {
+                messages.push(ModelMessage::tool(result, tool_call.clone()));
+            } else if let Err(e) = tool_result {
+                messages.push(ModelMessage::tool(
+                    format!("工具调用失败: {}", e),
+                    tool_call.clone()
+                ));
+            }
+        }
+        
+        // 阻塞执行聊天
+        let res = rt.block_on(self.chat("", messages.clone()))?;
+        let mut tool_calls = Vec::new();
+        for msg in res {
+            if msg.tool_calls.is_none() {
+                continue;
+            }
+            let mut calls = msg.tool_calls.unwrap();
+            tool_calls.append(&mut calls);
+        }
+        
+        // 递归调用（非异步）
+        self.tool_call(tool_calls, remain_loop - 1, messages)
+    }
 }
 
 #[cfg(test)]
@@ -112,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ChatClient::new("".to_string(), "".into(), vec![]);
+        let client = ChatClient::new("".to_string(), "".into(), vec![], 3);
         let stream = client.stream_chat("测试消息", vec![]);
         pin_mut!(stream);
 

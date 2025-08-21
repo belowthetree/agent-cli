@@ -1,12 +1,13 @@
 use std::fmt::Debug;
-
+use async_trait::async_trait;
 use rmcp::model::{CallToolResult, Tool};
 use serde_json::{Map, Value};
 
 pub mod choosetool;
 pub mod getbesttool;
 
+#[async_trait]
 pub trait InternalTool: Send + Sync + Debug {
-    fn call(&self, args: Map<String, Value>)->anyhow::Result<CallToolResult>;
+    async fn call(&self, args: Map<String, Value>)->anyhow::Result<CallToolResult>;
     fn get_mcp_tool(&self)->Tool;
 }

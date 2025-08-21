@@ -73,15 +73,15 @@ impl McpManager {
         res
     }
 
-    pub async fn call_tool(&self, server_name: &str, tool_name: &str, param: &serde_json::Value)->Result<String> {
-        info!("调用工具 {} {} {:?}", server_name, tool_name, param);
+    pub async fn call_tool(&self, tool_name: &str, param: &serde_json::Value)->Result<String> {
+        info!("调用工具 {} {:?}", tool_name, param);
         // 工具可能存在循环调用，services 在调用前必须先释放出来
         let service;
         {
             let services = self.services.lock().map_err(|e| anyhow::anyhow!("Failed to lock tool services: {}", e))?;
-            let t = services.get(server_name).cloned();
+            let t = services.get(tool_name).cloned();
             if t.is_none() {
-                return Err(anyhow::anyhow!("不存在这个 mcp 服务：{}", server_name));
+                return Err(anyhow::anyhow!("不存在这个 mcp 服务：{}", tool_name));
             }
             service = t.unwrap();
         }
@@ -107,7 +107,7 @@ impl McpManager {
                     name: std::borrow::Cow::Owned(tool_name.to_string()),
                     arguments: Some(arguments_map),
                 }).await?;
-                info!("调用工具 {} {} 结果 {:?}", server_name, tool_name, result);
+                info!("调用工具 {} 结果 {:?}", tool_name, result);
                 let mut res = String::new();
                 if result.content.len() <= 0 {
                     return Ok("".to_string())
@@ -132,7 +132,7 @@ impl McpManager {
             },
             // 内部定义的工具
             McpService::Internal(internal_tool) => {
-                let res = internal_tool.call(arguments_map)?;
+                let res = internal_tool.call(arguments_map).await?;
                 let mut rt = String::new();
                 for v in res.content {
                     if let RawContent::Text(ct) = v.raw {

@@ -1,7 +1,8 @@
 pub mod mcp_tool;
 pub mod mcp_server;
 pub mod mcp_manager;
-use std::process::exit;
+pub mod tool_desc;
+pub mod internalserver;
 
 pub use mcp_tool::McpTool;
 pub use mcp_manager::*;

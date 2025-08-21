@@ -8,6 +8,8 @@ use rmcp::{RoleClient, ServiceExt, service::RunningService, transport::Configure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct McpServerConfig {
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     #[serde(flatten)]
     pub transport: McpServerTransportConfig,
 }

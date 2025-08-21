@@ -34,8 +34,8 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = config::Config::local().unwrap();
     let mut chat = chat::Chat::new(config);
-    let res = chat.chat(&args.prompt).await;
-    println!("{:?}", res);
+    // let res = chat.chat(&args.prompt).await;
+    // println!("{:?}", res);
     // let stream = chat.stream_chat(&args.prompt);
 
     // pin_mut!(stream);

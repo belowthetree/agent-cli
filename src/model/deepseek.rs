@@ -113,7 +113,7 @@ impl AgentModel for DeepseekModel {
         }))
         .unwrap();
         debug!("{:?}", body);
-        connection::common::DirectConnection::request(self.url.clone(), self.get_api_key(), body).await
+        connection::common::DirectConnection::request(format!("{}/chat/completions", self.url), self.get_api_key(), body).await
     }
 
     async fn stream_chat(
@@ -143,7 +143,7 @@ impl AgentModel for DeepseekModel {
             "model": self.model_name,
             "messages": messages,
             "stream": true,
-            "tools": tools,
+            "tools": if tools.len() > 0 {Some(tools)} else {None},
             "temperature": param.temperature.unwrap_or(self.temperature.parse().unwrap())
         }))
         .unwrap();

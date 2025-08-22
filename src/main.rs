@@ -5,6 +5,7 @@ use clap::{command, Parser};
 use futures::StreamExt;
 use futures::pin_mut;
 
+use crate::client::chat_client::StreamedChatResponse;
 use crate::mcp::internalserver::getbesttool::GetBestTool;
 use crate::mcp::internalserver::InternalTool;
 use crate::mcp::{mcp_manager, McpManager};
@@ -23,7 +24,6 @@ struct Args {
     /// 提示词
     #[arg(short, long)]
     prompt: String,
-
     /// 值
     #[arg(short, long, default_value_t = String::new())]
     value: String,
@@ -32,8 +32,13 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
-
     mcp::init().await;
+    stream().await;
+
+    Ok(())
+}
+
+async fn chat() {
     let args = Args::parse();
     let config = config::Config::local().unwrap();
     let mut chat = chat::Chat::new(config, CHAT_PROMPT.to_string())
@@ -49,31 +54,23 @@ async fn main() -> anyhow::Result<()> {
             println!("{}{}", r.think, r.content);
         }
     }
-    // let stream = chat.stream_chat(&args.prompt);
+}
 
-    // pin_mut!(stream);
-    // while let Some(result) = stream.next().await {
-    //     match result {
-    //         Ok(resp) => match resp {
-    //             client::chat_client::StreamedChatResponse::Text(text) => {
-    //                 print!("{}", text);
-    //                 io::stdout().flush()?;
-    //             }
-    //             client::chat_client::StreamedChatResponse::ToolCall(tool_call) => {
-    //                 println!("\nTool Call: {:?}", tool_call.function.name);
-    //             }
-    //             client::chat_client::StreamedChatResponse::Reasoning(reasoning) => {
-    //                 print!("\nThinking: {}", reasoning);
-    //             }
-    //         },
-    //         Err(e) => {
-    //             eprintln!("\n接收错误: {}", e);
-    //             break;
-    //         }
-    //     }
-    // }
-
-    Ok(())
+async fn stream() {
+    let args = Args::parse();
+    let mut chat = chat::Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.into());
+    let stream = chat.stream_chat(&args.prompt);
+    pin_mut!(stream);
+    while let Some(result) = stream.next().await {
+        if let Ok(res) = result {
+            match res {
+                StreamedChatResponse::Text(text) => print!("{}", text),
+                StreamedChatResponse::ToolCall(tool_call) => print!("{:?}", tool_call),
+                StreamedChatResponse::Reasoning(think) => print!("{}", think),
+            }
+            io::stdout().flush();
+        }
+    }
 }
 
 #[cfg(test)]

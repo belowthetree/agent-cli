@@ -1,7 +1,7 @@
 use async_recursion::async_recursion;
 use async_stream::stream;
 use futures::{Stream, StreamExt};
-use log::info;
+use log::{info, warn};
 use rmcp::model::Tool;
 use serde_json::Value;
 use tokio::runtime::Runtime;
@@ -11,7 +11,7 @@ use crate::{connection::CommonConnectionContent, mcp::{McpManager, McpTool}, mod
 pub struct ChatClient {
     pub agent: deepseek::DeepseekModel,
     system: String,
-    tools: Vec<McpTool>,
+    tools: Vec<Tool>,
     max_tool_loop: usize,
 }
 
@@ -31,17 +31,22 @@ pub enum StreamedChatResponse {
 
 impl ChatClient {
     pub fn new(key: String, system: String, tools: Vec<McpTool>, max_tool_loop: usize) -> Self {
-        let agent = deepseek::DeepseekModel::new("https://api.deepseek.com/chat/completions".into(), "deepseek-chat".into(), key);
-        Self {
+        let agent = deepseek::DeepseekModel::new("https://api.deepseek.com".into(), "deepseek-chat".into(), key);
+        let mut client = Self {
             agent,
             system,
-            tools,
+            tools: vec![],
             max_tool_loop,
-        }
+        };
+        client.tools(tools);
+        client
     }
 
     pub fn tools(&mut self, tools: Vec<McpTool>) {
-        self.tools = tools;
+        self.tools.clear();
+        for tool in tools {
+            self.tools.push(tool.get_tool());
+        }
     }
 
     pub fn max_try(&mut self, max_tool_loop: usize) {
@@ -54,6 +59,39 @@ impl ChatClient {
             tools.push(tool.clone().into());
         }
         self.chat_with_tools(prompt, chat_history, &tools).await
+    }
+
+    pub fn chat2(&self, messages: Vec<ModelMessage>)->impl Stream<Item = Result<ModelMessage, anyhow::Error>> + '_ {
+        info!("chat2 开始 {:?}", messages);
+        let tools = if self.tools.len() > 0 {Some(self.tools.clone())} else {None};
+        let param = ModelInputParam{
+            temperature: None,
+            tools,
+            messages,
+        };
+        stream! {
+            let answer = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
+            info!("chat2 答复：{:?}", answer);
+            let mut tool_calls = Vec::new();
+            let mut content = String::new();
+            let mut think = String::new();
+            // 非流式请求，工具调用、回复、思维链在同一次回复里
+            for ctx in answer.iter() {
+                match ctx {
+                    CommonConnectionContent::ToolCall(tool) => {
+                        tool_calls.push(tool.clone());
+                    }
+                    CommonConnectionContent::Content(ct) => {
+                        content = ct.clone();
+                    }
+                    CommonConnectionContent::Reasoning(reason) => {
+                        think = reason.clone();
+                    }
+                    _ => {}
+                }
+            }
+            yield Ok(ModelMessage::assistant(content, think, tool_calls.clone()));
+        }
     }
 
     pub async fn chat_with_tools(&mut self, prompt: &str, mut chat_history: Vec<ModelMessage>, tools: &Vec<Tool>)->anyhow::Result<Vec<ModelMessage>> {
@@ -69,7 +107,7 @@ impl ChatClient {
             tools: ts,
             messages: chat_history.clone(),
         };
-        let (res, tool_calls) = self.chat_internal(param).await?;
+        let (res, tool_calls) = self.get_model_answer(param).await?;
         for msg in res.iter() {
             chat_history.push(msg.clone());
         }
@@ -79,31 +117,28 @@ impl ChatClient {
         Ok(chat_history)
     }
 
-    pub fn stream_chat(&self, prompt: &str, mut chat_history: Vec<ModelMessage>)-> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        let prompt = prompt.to_string();
+    // 返回增量
+    pub fn stream_chat(&self, messages: Vec<ModelMessage>)-> impl Stream<Item = Result<ModelMessage, anyhow::Error>> + '_ {
         let agent = self.agent.clone();
         stream! {
-            chat_history.push(ModelMessage::user(prompt.to_string()));
-            let mut tools = Vec::new();
-            for tool in self.tools.iter() {
-                tools.push(tool.clone().into());
-            }
+            let tools = if self.tools.len() > 0 {Some(self.tools.clone())} else {None};
             let param = ModelInputParam{
                 temperature: None,
-                tools: Some(tools),
-                messages: chat_history,
+                tools,
+                messages,
             };
+            info!("stream chat {:?}", param);
             let mut stream_res = Box::pin(agent.stream_chat(param).await);
             while let Some(res) = stream_res.next().await {
                 match res {
                     Ok(CommonConnectionContent::Content(text)) => {
-                        yield Ok(StreamedChatResponse::Text(text));
+                        yield Ok(ModelMessage::assistant(text, "".into(), vec![]));
                     }
                     Ok(CommonConnectionContent::ToolCall(tool_call)) => {
-                        yield Ok(StreamedChatResponse::ToolCall(tool_call));
+                        yield Ok(ModelMessage::assistant("".into(), "".into(), vec![tool_call]));
                     }
                     Ok(CommonConnectionContent::Reasoning(reasoning)) => {
-                        yield Ok(StreamedChatResponse::Reasoning(reasoning));
+                        yield Ok(ModelMessage::assistant("".into(), reasoning, vec![]));
                     }
                     Ok(CommonConnectionContent::FinishReason(_)) => {
                         break;
@@ -147,7 +182,7 @@ impl ChatClient {
         }
         info!("工具调用完成，返回工具结果给对话 {}", self.system);
         // 阻塞执行聊天
-        let (res, tool_calls) = self.chat_internal(ModelInputParam{
+        let (res, tool_calls) = self.get_model_answer(ModelInputParam{
             temperature: None,
             tools: Some(tools.clone()),
             messages: messages.clone(),
@@ -161,8 +196,38 @@ impl ChatClient {
         Box::pin(self.tool_call(tool_calls, remain_loop - 1, messages, tools)).await
     }
 
-    async fn chat_internal(&self, param: ModelInputParam)->anyhow::Result<(Vec<ModelMessage>, Vec<ToolCall>)> {
-        info!("调用 chat_internal {:?}", param.messages);
+    pub fn call_tool(&self, tool_calls: Vec<ToolCall>)-> impl Stream<Item = Result<ModelMessage, anyhow::Error>> {
+        stream! {
+            if tool_calls.len() <= 0 {
+                warn!("call_tool 工具数量不能为 0");
+                yield Err(anyhow::anyhow!("call_tool 工具数量不能为 0"));
+                return;
+            }
+            for tool_call in tool_calls {
+                // 解析工具调用参数
+                let arguments: Value = serde_json::from_str(&tool_call.function.arguments)
+                    .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+                // 调用工具（阻塞执行）
+                let tool_result = McpManager::global().call_tool(
+                    &tool_call.function.name,
+                    &arguments
+                ).await;
+                // 将工具调用结果添加到上下文
+                if let Ok(result) = tool_result {
+                    yield Ok(ModelMessage::tool(result, tool_call.clone()));
+                }
+                else if let Err(e) = tool_result {
+                    yield Ok(ModelMessage::tool(
+                        format!("工具调用失败：{}", e),
+                        tool_call.clone()
+                    ));
+                }
+            }
+        }
+    }
+
+    async fn get_model_answer(&self, param: ModelInputParam)->anyhow::Result<(Vec<ModelMessage>, Vec<ToolCall>)> {
+        info!("调用 get_model_answer {:?}", param.messages);
         let answer = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("答复：{:?}", answer);
         let mut tool_calls = Vec::new();
@@ -195,28 +260,23 @@ mod tests {
     use futures::{StreamExt, pin_mut};
     use super::*;
 
+    #[tokio::test]
     async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
         let client = ChatClient::new("".to_string(), "".into(), vec![], 3);
-        let stream = client.stream_chat("测试消息", vec![]);
+        let stream = client.stream_chat(vec![ModelMessage::user("测试消息".into())]);
         pin_mut!(stream);
 
         println!("开始接收流式响应:");
+        let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
         while let Some(result) = stream.next().await {
-            match result {
-                Ok(StreamedChatResponse::Text(text)) => {
-                    print!("{}", text);
-                    std::io::stdout().flush()?;
+            if let Ok(res) = result {
+                if msg.think.len() < res.think.len() {
+                    print!("{}", res.think.split_at(msg.think.len()).1);
+                    msg.think = res.think;
                 }
-                Ok(StreamedChatResponse::ToolCall(tool_call)) => {
-                    println!("\nTool Call: {:?}", tool_call);
-                }
-                Ok(StreamedChatResponse::Reasoning(reasoning)) => {
-                    print!("\nThinking: {}", reasoning);
-                    std::io::stdout().flush()?;
-                }
-                Err(e) => {
-                    eprintln!("\n接收错误: {}", e);
-                    break;
+                if msg.content.len() < res.content.len() {
+                    print!("{}", res.content.split_at(msg.content.len()).1);
+                    msg.content = res.content;
                 }
             }
         }

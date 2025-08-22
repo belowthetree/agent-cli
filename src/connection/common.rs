@@ -13,21 +13,23 @@ impl SseConnection {
     pub fn stream(url: String, key: String, body: String)->impl Stream<Item = Result<CommonConnectionContent, anyhow::Error>> {
         stream! {
             let client = reqwest::Client::new();
-            let response = client.post(url)
+            let response = client.post(url.clone())
                 .header(header::CONTENT_TYPE, "application/json")
-                .header("Authorization", key)
-                .body(body)
+                .header("Authorization", key.clone())
+                .body(body.clone())
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("{:?}", e.to_string()))?;
             if !response.status().is_success() {
+                error!("{:?}", response);
                 let ret = response.text().await.unwrap();
-                error!("{:?}", ret);
+                error!("{:?} {:?} {} {}", ret, body, url, key);
                 yield Err(anyhow::anyhow!(ret));
                 return;
             }
             // 开始循环解析 sse 流式传输
             let mut stream = response.bytes_stream();
+            let mut tool_calls = Vec::new();
             while let Some(chunk) = stream.next().await {
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
@@ -90,30 +92,31 @@ impl SseConnection {
                                 yield Ok(CommonConnectionContent::Reasoning(text_str.to_string()));
                             }
                         }
-                        // 处理工具调用
+                        // 处理工具调用，由于是字段增量的形式接受，等完全接收后再返回
                         if let Some(ctx) = message.get("tool_calls") {
                             if let Some(arr) = ctx.as_array() {
                                 for i in 0..arr.len() {
-                                    let tool: ToolCall = match serde_json::from_value(arr[i].clone()) {
-                                        Ok(tool) => tool,
-                                        Err(e) => {
-                                            warn!("Failed to parse tool call: {}", e);
-                                            continue;
-                                        }
-                                    };
-                                    // 注意此处所有信息都是增量的
-                                    yield Ok(CommonConnectionContent::ToolCall(tool));
-                                    // let t = ts.get_mut(tool.index).unwrap();
-                                    // t.id += &tool.id;
-                                    // t.r#type += &tool.r#type;
-                                    // t.function.name += &tool.function.name;
-                                    // t.function.arguments +=
-                                    //     &tool.function.arguments;
+                                    let tool: ToolCall =
+                                        serde_json::from_value(arr[i].clone())
+                                            .map_err(|e| anyhow::anyhow!(e))?;
+                                    if tool_calls.len() <= tool.index {
+                                        tool_calls.insert(tool.index, tool);
+                                        continue;
+                                    }
+                                    let t = tool_calls.get_mut(tool.index).unwrap();
+                                    t.id += &tool.id;
+                                    t.r#type += &tool.r#type;
+                                    t.function.name += &tool.function.name;
+                                    t.function.arguments +=
+                                        &tool.function.arguments;
                                 }
                             }
                         }
                     }
                 }
+            }
+            for tool in tool_calls {
+                yield Ok(CommonConnectionContent::ToolCall(tool));
             }
             yield Ok(CommonConnectionContent::Content("".to_string()))
         }

@@ -69,7 +69,6 @@ impl ChatClient {
             tools: ts,
             messages: chat_history.clone(),
         };
-        info!("{:?}", param);
         let (res, tool_calls) = self.chat_internal(param).await?;
         for msg in res.iter() {
             chat_history.push(msg.clone());
@@ -123,8 +122,6 @@ impl ChatClient {
     async fn tool_call(&mut self, tool_calls: Vec<ToolCall>, remain_loop: usize, messages: &mut Vec<ModelMessage>, tools: &Vec<Tool>)->anyhow::Result<()> {
         info!("tool_call {}", remain_loop);
         let should_break = remain_loop <= 0 || tool_calls.len() <= 0;
-        // 先处理完工具调用
-        messages.push(ModelMessage::assistant("".into(), "".into(), tool_calls.clone()));
         for tool_call in tool_calls {
             // 解析工具调用参数
             let arguments: Value = serde_json::from_str(&tool_call.function.arguments)
@@ -155,15 +152,11 @@ impl ChatClient {
             tools: Some(tools.clone()),
             messages: messages.clone(),
         }).await?;
-        let mut tool_calls = Vec::new();
         for msg in res {
-            if msg.tool_calls.is_none() {
-                continue;
-            }
-            let mut calls = msg.tool_calls.unwrap();
-            tool_calls.append(&mut calls);
+            messages.push(msg);
         }
-        
+        // 工具调用记入历史
+        messages.push(ModelMessage::assistant("".into(), "".into(), tool_calls.clone()));
         // 递归调用（非异步）
         Box::pin(self.tool_call(tool_calls, remain_loop - 1, messages, tools)).await
     }
@@ -191,10 +184,7 @@ impl ChatClient {
         }
         // 将模型、工具回复写入到上下文
         let mut res = Vec::new();
-        res.push(ModelMessage::assistant(content, think, vec![]));
-        for call in tool_calls.iter() {
-            res.push(ModelMessage::assistant_call(call.clone()));
-        }
+        res.push(ModelMessage::assistant(content, think, tool_calls.clone()));
         Ok((res, tool_calls))
     }
 }

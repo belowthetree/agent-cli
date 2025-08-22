@@ -46,9 +46,9 @@ impl McpManager {
                 server_name.clone(),
                 self_tools.contains_key(&tool.name.to_string())
             );
+            services.insert(mcptool.name(), McpService::from_config(transport.clone()));
             self_tools.insert(mcptool.name(), mcptool);
         }
-        services.insert(server_name, McpService::from_config(transport));
         let _ = service.notify_initialized().await;
         Ok(())
     }
@@ -115,9 +115,17 @@ impl McpManager {
                     error!("{}", e);
                     return Err(anyhow::anyhow!("{}", e));
                 }
+                if !self.tools.lock().unwrap().contains_key(tool_name) {
+                    error!("找不到工具配置 {}", tool_name);
+                    return Err(anyhow::anyhow!("找不到工具配置 {}", tool_name));
+                }
+                let mcptool;
+                {
+                    mcptool = self.tools.lock().unwrap().get(tool_name).unwrap().clone();
+                }
                 let service = service.unwrap();
                 result = service.call_tool(rmcp::model::CallToolRequestParam {
-                    name: std::borrow::Cow::Owned(tool_name.to_string()),
+                    name: std::borrow::Cow::Owned(mcptool.origin_name()),
                     arguments: Some(arguments_map),
                 }).await?;
             },

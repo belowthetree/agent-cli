@@ -63,7 +63,7 @@ RUST_LOG=debug agent-cli --prompt "your prompt"
 
 ## 📜 License
 
-MIT
+[GPL_V3](LICENSE)
 
 <a name="chinese-version"></a>
 ## Chinese Version

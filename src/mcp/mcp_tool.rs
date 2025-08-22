@@ -40,6 +40,10 @@ impl McpTool {
         name
     }
 
+    pub fn origin_name(&self)->String {
+        self.tool.name.to_string()
+    }
+
     // 获取服务器名称
     pub fn server_name(&self) -> &str {
         &self.server_name

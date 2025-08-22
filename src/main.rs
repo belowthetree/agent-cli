@@ -8,12 +8,14 @@ use futures::pin_mut;
 use crate::mcp::internalserver::getbesttool::GetBestTool;
 use crate::mcp::internalserver::InternalTool;
 use crate::mcp::{mcp_manager, McpManager};
+use crate::prompt::CHAT_PROMPT;
 mod config;
 mod chat;
 mod client;
 mod mcp;
 mod model;
 mod connection;
+mod prompt;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -34,9 +36,19 @@ async fn main() -> anyhow::Result<()> {
     mcp::init().await;
     let args = Args::parse();
     let config = config::Config::local().unwrap();
-    let mut chat = chat::Chat::new(config, "你是一个优秀的助理，你擅长替人解决问题，必要时可以灵活使用工具".into());
+    let mut chat = chat::Chat::new(config, CHAT_PROMPT.to_string())
+    .tools(mcp::get_config_tools())
+    .max_try(3);
     let res = chat.chat(&args.prompt).await;
-    println!("{:?}", res);
+    if res.is_err() {
+        println!("{:?}", res.unwrap_err().to_string());
+        exit(-1);
+    } else {
+        let res = res.unwrap();
+        for r in res {
+            println!("{}{}", r.think, r.content);
+        }
+    }
     // let stream = chat.stream_chat(&args.prompt);
 
     // pin_mut!(stream);
@@ -67,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use log::info;
-    use crate::chat::Chat;
+    use crate::{chat::Chat, prompt::CHAT_PROMPT};
     use super::*;
 
     async fn test_select_tool() {
@@ -78,11 +90,10 @@ mod tests {
         let _ = GetBestTool.call(map).await;
     }
 
-    #[tokio::test]
-    async fn test_common_chat() {
+    async fn test_search_tool_chat() {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
-        let mut chat = Chat::new(config::Config::local().unwrap(), "你是一个优秀的助理，你擅长替人解决问题，必要时可以灵活使用工具。对于用户的提问或者对话请认真回答".into())
+        let mut chat = Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.to_string().into())
         .tools(mcp::get_basic_tools())
         .max_try(1);
         let res = chat.chat("你好，帮我查一下github提交信息").await;

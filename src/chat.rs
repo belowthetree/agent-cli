@@ -17,10 +17,9 @@ pub struct Chat {
 
 impl Chat {
     pub fn new(config: Config, system: String) -> Self {
-        let tools = McpManager::global().get_all_tools();
         let max_try = max(config.max_tool_try, 0);
         Self {
-            client: ChatClient::new(config.deepseek_key, system, tools, max_try),
+            client: ChatClient::new(config.deepseek_key, system, vec![], max_try),
             context: vec![],
             max_tool_try: max_try,
         }
@@ -28,6 +27,12 @@ impl Chat {
 
     pub fn tools(mut self, tools: Vec<McpTool>)->Self {
         self.client.tools(tools);
+        self
+    }
+
+    pub fn max_try(mut self, max_try: usize)->Self {
+        self.max_tool_try = max_try;
+        self.client.max_try(self.max_tool_try);
         self
     }
 

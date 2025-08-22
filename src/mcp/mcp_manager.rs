@@ -1,13 +1,22 @@
 use std::collections::HashMap;
+use std::result;
 use std::sync::{Arc, Mutex, OnceLock};
 use log::{info, warn, error};
 use anyhow::Result;
 use rmcp::model::RawContent;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::McpServerTransportConfig;
+use crate::mcp::internalserver::InternalTool;
 use crate::mcp::mcp_server::McpService;
 use crate::mcp::McpTool;
+
+#[derive(Serialize, Deserialize)]
+pub struct ToolDesc {
+    pub name: String,
+    pub desc: String,
+}
 
 pub struct McpManager {
     services: Arc<Mutex<HashMap<String, McpService>>>,
@@ -28,8 +37,6 @@ impl McpManager {
     pub async fn add_tool_service(&self, server_name: String, transport: McpServerTransportConfig) -> Result<()> {
         let mut services = self.services.lock().map_err(|e| anyhow::anyhow!("Failed to lock tool services: {}", e))?;
         let service = transport.start().await?;
-        let prompt = service.list_all_prompts().await;//(GetPromptRequestParam{ name: "simple_prompt".into(), arguments: None }).await;
-        info!("prompt {:?}", prompt);
         let tools = service.list_all_tools().await?;
         let mut self_tools = self.tools.lock().map_err(|e| anyhow::anyhow!("解锁 tools 失败 {}", e))?;
         for tool in tools.iter() {
@@ -46,22 +53,19 @@ impl McpManager {
         Ok(())
     }
 
-    /// 获取所有工具名称
-    pub fn get_all_server_names(&self) -> Result<Vec<String>> {
-        let services = self.services.lock().map_err(|e| anyhow::anyhow!("Failed to lock tool services: {}", e))?;
-        Ok(services.keys().map(|k| k.clone()).collect())
-    }
-
-    /// 检查工具服务是否存在
-    pub fn has_tool_service(&self, server_name: &str) -> Result<bool> {
-        let services = self.services.lock().map_err(|e| anyhow::anyhow!("Failed to lock tool services: {}", e))?;
-        Ok(services.contains_key(server_name))
-    }
-
-    /// 清空所有工具服务
-    pub fn clear_services(&self) -> Result<()> {
+    pub fn add_internal_tool(&self, tool: Arc<dyn InternalTool>)->Result<()> {
         let mut services = self.services.lock().map_err(|e| anyhow::anyhow!("Failed to lock tool services: {}", e))?;
-        services.clear();
+        let mut self_tools = self.tools.lock().map_err(|e| anyhow::anyhow!("解锁 tools 失败 {}", e))?;
+        services.insert(tool.name().to_string(), McpService::from_internal(tool.clone()));
+        self_tools.insert(tool.name().to_string(), McpTool::new(tool.get_mcp_tool(), "".into(), false));
+        Ok(())
+    }
+
+    pub fn remove_tool(&self, name: &str)->Result<()> {
+       let mut services = self.services.lock().map_err(|e| anyhow::anyhow!("Failed to lock tool services: {}", e))?;
+        services.remove(name);
+        let mut self_tools = self.tools.lock().map_err(|e| anyhow::anyhow!("解锁 tools 失败 {}", e))?;
+        self_tools.remove(name);
         Ok(())
     }
 
@@ -69,6 +73,14 @@ impl McpManager {
         let mut res = Vec::new();
         for (_, tool) in self.tools.lock().unwrap().iter() {
             res.push(tool.clone());
+        }
+        res
+    }
+
+    pub fn get_all_tool_desc(&self)->Vec<ToolDesc> {
+        let mut res = Vec::new();
+        for (_, tool) in self.tools.lock().unwrap().iter() {
+            res.push(ToolDesc { name: tool.name(), desc: tool.desc() });
         }
         res
     }
@@ -93,6 +105,7 @@ impl McpManager {
             serde_json::Map::new()
         };
 
+        let result;
         match service {
             // 外部 mcp 工具的调用
             McpService::Common(transport) => {
@@ -103,44 +116,37 @@ impl McpManager {
                     return Err(anyhow::anyhow!("{}", e));
                 }
                 let service = service.unwrap();
-                let result = service.call_tool(rmcp::model::CallToolRequestParam {
+                result = service.call_tool(rmcp::model::CallToolRequestParam {
                     name: std::borrow::Cow::Owned(tool_name.to_string()),
                     arguments: Some(arguments_map),
                 }).await?;
-                info!("调用工具 {} 结果 {:?}", tool_name, result);
-                let mut res = String::new();
-                if result.content.len() <= 0 {
-                    return Ok("".to_string())
-                }
-                for v in result.content.iter() {
-                    match &v.raw {
-                        rmcp::model::RawContent::Text(raw_text_content) => {
-                            res += raw_text_content.text.as_str();
-                        },
-                        rmcp::model::RawContent::Image(_) => {
-                            warn!("无法处理的 mcp tool 返回类型：图片");
-                        },
-                        rmcp::model::RawContent::Resource(_) => {
-                            warn!("无法处理的 mcp tool 返回类型：嵌入资源");
-                        },
-                        rmcp::model::RawContent::Audio(_) => {
-                            warn!("无法处理的 mcp tool 返回类型：音频");
-                        },
-                    }
-                }
-                Ok(res)
             },
             // 内部定义的工具
             McpService::Internal(internal_tool) => {
-                let res = internal_tool.call(arguments_map).await?;
-                let mut rt = String::new();
-                for v in res.content {
-                    if let RawContent::Text(ct) = v.raw {
-                        rt += ct.text.as_str();
-                    }
-                }
-                Ok(rt)
+                result = internal_tool.call(arguments_map).await?;
             },
         }
+        info!("调用工具 {} 结果 {:?}", tool_name, result);
+        let mut res = String::new();
+        if result.content.len() <= 0 {
+            return Ok("".to_string())
+        }
+        for v in result.content.iter() {
+            match &v.raw {
+                rmcp::model::RawContent::Text(raw_text_content) => {
+                    res += raw_text_content.text.as_str();
+                },
+                rmcp::model::RawContent::Image(_) => {
+                    warn!("无法处理的 mcp tool 返回类型：图片");
+                },
+                rmcp::model::RawContent::Resource(_) => {
+                    warn!("无法处理的 mcp tool 返回类型：嵌入资源");
+                },
+                rmcp::model::RawContent::Audio(_) => {
+                    warn!("无法处理的 mcp tool 返回类型：音频");
+                },
+            }
+        }
+        Ok(res)
     }
 }

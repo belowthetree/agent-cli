@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use log::info;
 use rmcp::model::{Annotated, RawContent, RawTextContent};
 
-use crate::{chat::Chat, config, mcp::{internalserver::InternalTool, McpManager}};
+use crate::{chat::Chat, config, mcp::{internalserver::{choosetool::ChooseTool, InternalTool}, McpManager, McpTool}};
 
 #[derive(Debug)]
 pub struct GetBestTool;
@@ -14,22 +17,33 @@ impl InternalTool for GetBestTool {
         if !args.contains_key("tool_description") {
             return Err(anyhow::anyhow!("GetBestToo 缺少参数 tool_description"));
         }
+        // 先新建一个对话
         let prompt = args.get("tool_description").unwrap().as_str().unwrap();
         let mut config = config::Config::local().unwrap();
-        config.max_tool_try = 1;
-        let tools = McpManager::global().get_all_tools();
+        config.max_tool_try = 0;
+        let tools = McpManager::global().get_all_tool_desc();
         let s = serde_json::to_string(&tools).unwrap();
-        let mut chat = Chat::new(config, PROMPT.to_string() + " 以下是工具列表：\n" + s.as_str());
-        let res = chat.chat_with_tools(prompt, &vec![self.get_mcp_tool()]).await?;
+        let system = PROMPT.to_string() + " 以下是工具列表：\n" + s.as_str();
+        info!("prompt {}", prompt);
+        // 把“选择工具”的接口传给 mcp_manager 和对话器
+        let tool = ChooseTool.get_mcp_tool();
+        McpManager::global().add_internal_tool(Arc::new(ChooseTool))?;
+        let mut chat = Chat::new(config, system)
+        .tools(vec![McpTool::new(tool.clone(), "".into(), false)]);
+        // 开始获取结果
+        let res = chat.chat(prompt).await?;
+        // 获取完毕后清理下临时接口
+        McpManager::global().remove_tool(&tool.name)?;
         let mut arr: Vec<String> = Vec::new();
-        for r in res.iter() {
-            arr.push(serde_json::from_str(r.content.as_str())?);
+        if res.len() > 0 {
+            let selects = res.get(res.len() - 1).unwrap();
+            info!("获取最佳工具：{:?}", selects);
+            arr.push(selects.content.clone());
         }
         let mut res = Vec::new();
         for s in arr {
             res.push(Annotated::new(RawContent::Text(RawTextContent { text: s }), None));
         }
-        println!("{:?}", res);
         Ok(rmcp::model::CallToolResult {
             content: res,
             structured_content: None,
@@ -66,5 +80,9 @@ r#"
 }"#).unwrap()),
             annotations: None,
         }
+    }
+
+    fn name(&self)->String {
+        "get_best_tool".into()
     }
 }

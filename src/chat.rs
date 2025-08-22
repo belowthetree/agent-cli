@@ -6,32 +6,29 @@ use std::collections::HashMap;
 
 use crate::client::chat_client::{ChatClient, ChatResult, StreamedChatResponse};
 use crate::config::Config;
-use crate::mcp::{McpManager};
+use crate::mcp::{McpManager, McpTool};
 use crate::model::param::ModelMessage;
 
 pub struct Chat {
     pub client: ChatClient,
     pub context: Vec<ModelMessage>,
-    tool_map: HashMap<String, String>, // 工具名称 -> 服务器名称映射
     max_tool_try: usize,
 }
 
 impl Chat {
     pub fn new(config: Config, system: String) -> Self {
         let tools = McpManager::global().get_all_tools();
-        let mut tool_map = HashMap::new();
-        
-        // 构建工具名称到服务器名称的映射
-        for tool in &tools {
-            tool_map.insert(tool.name(), tool.server_name().to_string());
-        }
-        
+        let max_try = max(config.max_tool_try, 0);
         Self {
-            client: ChatClient::new(config.deepseek_key, system, tools, max(config.max_tool_try, 3)),
+            client: ChatClient::new(config.deepseek_key, system, tools, max_try),
             context: vec![],
-            tool_map,
-            max_tool_try: max(config.max_tool_try, 1),
+            max_tool_try: max_try,
         }
+    }
+
+    pub fn tools(mut self, tools: Vec<McpTool>)->Self {
+        self.client.tools(tools);
+        self
     }
 
     pub async fn chat(&mut self, prompt: &str) -> anyhow::Result<Vec<ChatResult>> {

@@ -44,6 +44,10 @@ impl McpTool {
     pub fn server_name(&self) -> &str {
         &self.server_name
     }
+
+    pub fn desc(&self)->String {
+        self.tool.description.clone().unwrap_or_default().to_string()
+    }
 }
 
 impl Into<Tool> for McpTool{

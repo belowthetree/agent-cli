@@ -10,4 +10,5 @@ pub mod getbesttool;
 pub trait InternalTool: Send + Sync + Debug {
     async fn call(&self, args: Map<String, Value>)->anyhow::Result<CallToolResult>;
     fn get_mcp_tool(&self)->Tool;
+    fn name(&self)->String;
 }

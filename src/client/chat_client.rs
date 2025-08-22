@@ -1,5 +1,7 @@
+use async_recursion::async_recursion;
 use async_stream::stream;
 use futures::{Stream, StreamExt};
+use log::info;
 use rmcp::model::Tool;
 use serde_json::Value;
 use tokio::runtime::Runtime;
@@ -38,6 +40,10 @@ impl ChatClient {
         }
     }
 
+    pub fn tools(&mut self, tools: Vec<McpTool>) {
+        self.tools = tools;
+    }
+
     pub async fn chat(&mut self, prompt: &str, chat_history: Vec<ModelMessage>) -> anyhow::Result<Vec<ModelMessage>> {
         let mut tools = Vec::new();
         for tool in self.tools.iter() {
@@ -58,8 +64,13 @@ impl ChatClient {
             tools: Some(tools.clone()),
             messages: chat_history.clone(),
         };
-        let (res, tool_calls) = self.chat_internal(param).await?;
-        self.tool_call(tool_calls, self.max_tool_loop, &mut chat_history, tools).await?;
+        let (mut res, tool_calls) = self.chat_internal(param).await?;
+        if tool_calls.len() > 0 {
+            self.tool_call(tool_calls, self.max_tool_loop, &mut chat_history, tools).await?;
+            for his in chat_history {
+                res.push(his);
+            }
+        }
         Ok(res)
     }
 
@@ -101,26 +112,22 @@ impl ChatClient {
         }
     }
 
+    #[async_recursion]
     // 执行工具循环调用
     async fn tool_call(&mut self, tool_calls: Vec<ToolCall>, remain_loop: usize, messages: &mut Vec<ModelMessage>, tools: &Vec<Tool>)->anyhow::Result<()> {
-        if remain_loop <= 0 || tool_calls.len() <= 0 {
-            return Ok(());
-        }
-        
-        // 创建运行时来执行异步操作
-        let rt = Runtime::new().map_err(|e| anyhow::anyhow!("Failed to create runtime: {}", e))?;
-        
+        info!("tool_call {}", remain_loop);
+        let should_break = remain_loop <= 0 || tool_calls.len() <= 0;
+        // 先处理完工具调用
         messages.push(ModelMessage::assistant("".into(), "".into(), tool_calls.clone()));
         for tool_call in tool_calls {
             // 解析工具调用参数
             let arguments: Value = serde_json::from_str(&tool_call.function.arguments)
                 .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
             // 调用工具（阻塞执行）
-            let tool_result = rt.block_on(McpManager::global().call_tool(
+            let tool_result = McpManager::global().call_tool(
                 &tool_call.function.name,
                 &arguments
-            ));
-            println!("{:?}", tool_result);
+            ).await;
             // 将工具调用结果添加到上下文
             if let Ok(result) = tool_result {
                 messages.push(ModelMessage::tool(result, tool_call.clone()));
@@ -131,7 +138,10 @@ impl ChatClient {
                 ));
             }
         }
-        
+        // 工具调用可以无限，但是聊天不能
+        if should_break {
+            return Ok(());
+        }
         // 阻塞执行聊天
         let (res, tool_calls) = self.chat_internal(ModelInputParam{
             temperature: None,
@@ -152,6 +162,7 @@ impl ChatClient {
     }
 
     async fn chat_internal(&self, param: ModelInputParam)->anyhow::Result<(Vec<ModelMessage>, Vec<ToolCall>)> {
+        info!("调用 chat_internal");
         let res = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
         let mut tool_calls = Vec::new();
         let content = String::new();

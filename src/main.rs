@@ -34,13 +34,9 @@ async fn main() -> anyhow::Result<()> {
     mcp::init().await;
     let args = Args::parse();
     let config = config::Config::local().unwrap();
-    let mut map = serde_json::Map::new();
-    map.insert("tool_description".into(), serde_json::Value::String("能够推送仓库到远程的工具".into()));
-    let res = GetBestTool.call(map).await;
+    let mut chat = chat::Chat::new(config, "你是一个优秀的助理，你擅长替人解决问题，必要时可以灵活使用工具".into());
+    let res = chat.chat(&args.prompt).await;
     println!("{:?}", res);
-    // let mut chat = chat::Chat::new(config, "你是一个优秀的助理，你擅长替人解决问题，必要时可以灵活使用工具".into());
-    // let res = chat.chat(&args.prompt).await;
-    // println!("{:?}", res);
     // let stream = chat.stream_chat(&args.prompt);
 
     // pin_mut!(stream);
@@ -73,7 +69,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    fn test_tool() {
-
+    async fn test_tool() {
+        log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
+        mcp::init().await;
+        let mut map = serde_json::Map::new();
+        map.insert("tool_description".into(), serde_json::Value::String("能够推送仓库到远程的工具".into()));
+        let res = GetBestTool.call(map).await;
     }
 }

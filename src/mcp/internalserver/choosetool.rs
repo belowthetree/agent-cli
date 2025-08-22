@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use log::info;
 use rmcp::model::{Annotated, CallToolResult, RawContent, RawTextContent, Tool};
 use serde_json::{Map, Value};
 
@@ -12,10 +13,15 @@ pub struct ChooseTool;
 #[async_trait]
 impl InternalTool for ChooseTool {
     async fn call(&self, args: Map<String, Value>)->anyhow::Result<CallToolResult> {
+        if !args.contains_key("tools") {
+            return Err(anyhow::anyhow!("choose_tool tools"));
+        }
+        let parse = serde_json::to_string(&args);
+        info!("选择工具：{:?}", parse);
         Ok(CallToolResult {
             content: vec![Annotated::new(
                 RawContent::Text(RawTextContent {
-                    text: serde_json::to_string(&args).unwrap(),
+                    text: parse.unwrap(),
                 }),
                 None,
             )],
@@ -44,5 +50,9 @@ impl InternalTool for ChooseTool {
             output_schema: None,
             annotations: None,
         }
+    }
+
+    fn name(&self)->String {
+        "choose_tool".into()
     }
 }

@@ -10,7 +10,6 @@ pub struct ChatClient {
     pub agent: deepseek::DeepseekModel,
     system: String,
     tools: Vec<McpTool>,
-    using_tool: bool,
     max_tool_loop: usize,
 }
 
@@ -35,7 +34,6 @@ impl ChatClient {
             agent,
             system,
             tools,
-            using_tool: false,
             max_tool_loop,
         }
     }
@@ -60,22 +58,8 @@ impl ChatClient {
             tools: Some(tools.clone()),
             messages: chat_history.clone(),
         };
-        let res = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
-        let mut tool_calls = Vec::new();
-        let content = String::new();
-        let think = String::new();
-        for ctx in res.iter() {
-            if let CommonConnectionContent::ToolCall(tool) = ctx {
-                tool_calls.push(tool.clone());
-            }
-        }
-        let mut res = Vec::new();
-        res.push(ModelMessage::assistant(content, think, tool_calls.clone()));
-        if !self.using_tool {
-            self.using_tool = true;
-            self.tool_call(tool_calls, self.max_tool_loop, &mut chat_history)?;
-            self.using_tool = false;
-        }
+        let (res, tool_calls) = self.chat_internal(param).await?;
+        self.tool_call(tool_calls, self.max_tool_loop, &mut chat_history, tools).await?;
         Ok(res)
     }
 
@@ -118,7 +102,7 @@ impl ChatClient {
     }
 
     // 执行工具循环调用
-    fn tool_call(&mut self, tool_calls: Vec<ToolCall>, remain_loop: usize, messages: &mut Vec<ModelMessage>)->anyhow::Result<()> {
+    async fn tool_call(&mut self, tool_calls: Vec<ToolCall>, remain_loop: usize, messages: &mut Vec<ModelMessage>, tools: &Vec<Tool>)->anyhow::Result<()> {
         if remain_loop <= 0 || tool_calls.len() <= 0 {
             return Ok(());
         }
@@ -149,7 +133,11 @@ impl ChatClient {
         }
         
         // 阻塞执行聊天
-        let res = rt.block_on(self.chat("", messages.clone()))?;
+        let (res, tool_calls) = self.chat_internal(ModelInputParam{
+            temperature: None,
+            tools: Some(tools.clone()),
+            messages: messages.clone(),
+        }).await?;
         let mut tool_calls = Vec::new();
         for msg in res {
             if msg.tool_calls.is_none() {
@@ -160,7 +148,22 @@ impl ChatClient {
         }
         
         // 递归调用（非异步）
-        self.tool_call(tool_calls, remain_loop - 1, messages)
+        Box::pin(self.tool_call(tool_calls, remain_loop - 1, messages, tools)).await
+    }
+
+    async fn chat_internal(&self, param: ModelInputParam)->anyhow::Result<(Vec<ModelMessage>, Vec<ToolCall>)> {
+        let res = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
+        let mut tool_calls = Vec::new();
+        let content = String::new();
+        let think = String::new();
+        for ctx in res.iter() {
+            if let CommonConnectionContent::ToolCall(tool) = ctx {
+                tool_calls.push(tool.clone());
+            }
+        }
+        let mut res = Vec::new();
+        res.push(ModelMessage::assistant(content, think, tool_calls.clone()));
+        Ok((res, tool_calls))
     }
 }
 

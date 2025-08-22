@@ -67,3 +67,13 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    fn test_tool() {
+
+    }
+}

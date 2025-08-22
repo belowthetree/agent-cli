@@ -27,13 +27,25 @@ impl ModelMessage {
     }
 
     pub fn assistant(content: String, think: String, tool_calls: Vec<ToolCall>)->Self {
+        let tool_calls = if tool_calls.len() > 0 { Some(tool_calls) } else { None };
         Self {
             role: "assistant".into(),
             content,
             think: "".into(),
             name: "".into(),
             tool_call_id: "".into(),
-            tool_calls: Some(tool_calls),
+            tool_calls,
+        }
+    }
+
+    pub fn assistant_call(tool: ToolCall)->Self {
+        Self {
+            role: "assistant".into(),
+            content: "".into(),
+            think: "".into(),
+            name: "".into(),
+            tool_call_id: tool.id.clone(),
+            tool_calls: Some(vec![tool]),
         }
     }
 

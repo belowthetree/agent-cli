@@ -4,10 +4,12 @@ pub mod mcp_manager;
 pub mod tool_desc;
 pub mod internalserver;
 
+use std::sync::Arc;
+
 pub use mcp_tool::McpTool;
 pub use mcp_manager::*;
 
-use crate::config;
+use crate::{config, mcp::internalserver::{getbesttool::GetBestTool, InternalTool}};
 
 pub async fn init() {
     let config = config::Config::local().unwrap();
@@ -21,4 +23,11 @@ pub async fn init() {
         println!("{:?}", server.transport);
         let _ = mgr.add_tool_service(server.name.clone(), server.transport.clone()).await;
     }
+    let _ = mgr.add_internal_tool(Arc::new(GetBestTool));
+}
+
+pub fn get_basic_tools()->Vec<McpTool> {
+    vec![
+        McpTool::new(GetBestTool.get_mcp_tool(), "".into(), false),
+    ]
 }

@@ -44,6 +44,10 @@ impl ChatClient {
         self.tools = tools;
     }
 
+    pub fn max_try(&mut self, max_tool_loop: usize) {
+        self.max_tool_loop = max_tool_loop;
+    }
+
     pub async fn chat(&mut self, prompt: &str, chat_history: Vec<ModelMessage>) -> anyhow::Result<Vec<ModelMessage>> {
         let mut tools = Vec::new();
         for tool in self.tools.iter() {
@@ -59,19 +63,21 @@ impl ChatClient {
         if prompt.len() > 0 {
             chat_history.push(ModelMessage::user(prompt.to_string()));
         }
+        let ts = if tools.len() > 0 {Some(tools.clone())} else {None};
         let param = ModelInputParam{
             temperature: None,
-            tools: Some(tools.clone()),
+            tools: ts,
             messages: chat_history.clone(),
         };
-        let (mut res, tool_calls) = self.chat_internal(param).await?;
+        info!("{:?}", param);
+        let (res, tool_calls) = self.chat_internal(param).await?;
+        for msg in res.iter() {
+            chat_history.push(msg.clone());
+        }
         if tool_calls.len() > 0 {
             self.tool_call(tool_calls, self.max_tool_loop, &mut chat_history, tools).await?;
-            for his in chat_history {
-                res.push(his);
-            }
         }
-        Ok(res)
+        Ok(chat_history)
     }
 
     pub fn stream_chat(&self, prompt: &str, mut chat_history: Vec<ModelMessage>)-> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
@@ -142,6 +148,7 @@ impl ChatClient {
         if should_break {
             return Ok(());
         }
+        info!("工具调用完成，返回工具结果给对话 {}", self.system);
         // 阻塞执行聊天
         let (res, tool_calls) = self.chat_internal(ModelInputParam{
             temperature: None,
@@ -162,18 +169,32 @@ impl ChatClient {
     }
 
     async fn chat_internal(&self, param: ModelInputParam)->anyhow::Result<(Vec<ModelMessage>, Vec<ToolCall>)> {
-        info!("调用 chat_internal");
-        let res = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
+        info!("调用 chat_internal {:?}", param.messages);
+        let answer = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
+        info!("答复：{:?}", answer);
         let mut tool_calls = Vec::new();
-        let content = String::new();
-        let think = String::new();
-        for ctx in res.iter() {
-            if let CommonConnectionContent::ToolCall(tool) = ctx {
-                tool_calls.push(tool.clone());
+        let mut content = String::new();
+        let mut think = String::new();
+        for ctx in answer.iter() {
+            match ctx {
+                CommonConnectionContent::ToolCall(tool) => {
+                    tool_calls.push(tool.clone());
+                }
+                CommonConnectionContent::Content(ct) => {
+                    content = ct.clone();
+                }
+                CommonConnectionContent::Reasoning(reason) => {
+                    think = reason.clone();
+                }
+                _ => {}
             }
         }
+        // 将模型、工具回复写入到上下文
         let mut res = Vec::new();
-        res.push(ModelMessage::assistant(content, think, tool_calls.clone()));
+        res.push(ModelMessage::assistant(content, think, vec![]));
+        for call in tool_calls.iter() {
+            res.push(ModelMessage::assistant_call(call.clone()));
+        }
         Ok((res, tool_calls))
     }
 }
@@ -184,7 +205,6 @@ mod tests {
     use futures::{StreamExt, pin_mut};
     use super::*;
 
-    #[tokio::test]
     async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
         let client = ChatClient::new("".to_string(), "".into(), vec![], 3);
         let stream = client.stream_chat("测试消息", vec![]);

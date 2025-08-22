@@ -64,7 +64,7 @@ RUST_LOG=debug agent-cli --prompt "您的提示"
 
 ## 📜 许可证
 
-MIT
+[GPL_V3](LICENSE)
 
 <a name="english-version"></a>
 ## English Version

@@ -5,8 +5,9 @@ use futures::{pin_mut, StreamExt};
 use log::info;
 use rmcp::model::{Annotated, RawContent, RawTextContent};
 
-use crate::{chat::Chat, config, mcp::{internalserver::{choosetool::ChooseTool, InternalTool}, McpManager, McpTool}, model::param::ModelMessage};
+use crate::{chat::Chat, config, mcp::{internalserver::{choosetool::ChooseTool, InternalTool}, McpManager, McpTool}};
 
+#[allow(unused)]
 #[derive(Debug)]
 pub struct GetBestTool;
 

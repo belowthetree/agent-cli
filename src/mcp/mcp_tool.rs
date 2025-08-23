@@ -1,7 +1,5 @@
 use rmcp::model::Tool;
 use serde::{Deserialize, Serialize};
-use futures::{future, TryFutureExt};
-use crate::mcp::McpManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpTool {
@@ -20,12 +18,6 @@ impl McpTool {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("McpError error")]
-pub struct McpError {
-    text: String,
-}
-
 impl McpTool {
     pub fn get_tool(&self)->Tool {
         self.tool.clone()
@@ -42,11 +34,6 @@ impl McpTool {
 
     pub fn origin_name(&self)->String {
         self.tool.name.to_string()
-    }
-
-    // 获取服务器名称
-    pub fn server_name(&self) -> &str {
-        &self.server_name
     }
 
     pub fn desc(&self)->String {

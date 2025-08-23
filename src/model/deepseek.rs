@@ -1,17 +1,12 @@
 use crate::connection::{self, CommonConnectionContent};
-use crate::model::param::{ModelInputParam, ModelResponse, ToolCall};
+use crate::model::param::{ModelInputParam};
 use crate::model::AgentModel;
 use futures::Stream;
-use futures_util::StreamExt;
-use log::{debug, warn};
+use log::{debug};
 use reqwest::{header, Client};
 use rmcp::model::JsonObject;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use futures_util::stream;
-
-// 定义回调函数类型
-pub type SseCallback = Box<dyn FnMut(&ModelResponse) + Send>;
+use serde_json::{json};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeepseekFunctionItem {
@@ -48,6 +43,7 @@ impl DeepseekModel {
         format!("Bearer {}", self.api_key)
     }
 
+    #[allow(unused)]
     async fn get_models(&self) -> Result<Vec<String>, String> {
         let client = Client::new();
         let response = client

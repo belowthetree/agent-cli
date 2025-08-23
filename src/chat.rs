@@ -1,16 +1,13 @@
 use async_stream::stream;
-use futures::{pin_mut, stream, Stream, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use log::info;
-use rmcp::model::Tool;
-use serde_json::Value;
 use std::cmp::max;
-use std::collections::HashMap;
 use std::fmt::Display;
 
-use crate::client::chat_client::{ChatClient, ChatResult};
+use crate::client::chat_client::{ChatClient};
 use crate::client::tool_client;
 use crate::config::Config;
-use crate::mcp::{McpManager, McpTool};
+use crate::mcp::{McpTool};
 use crate::model::param::{ModelMessage, ToolCall};
 
 pub struct Chat {
@@ -53,13 +50,14 @@ impl Chat {
     pub fn new(config: Config, system: String) -> Self {
         let max_try = max(config.max_tool_try, 0);
         Self {
-            client: ChatClient::new(config.deepseek_key, system, vec![], max_try),
-            context: vec![],
+            client: ChatClient::new(config.deepseek_key, vec![]),
+            context: vec![ModelMessage::system(system)],
             max_tool_try: max_try,
             cancel_token: tokio_util::sync::CancellationToken::new(),
         }
     }
 
+    #[allow(unused)]
     pub fn cancel(&self) {
         self.cancel_token.cancel();
     }
@@ -69,9 +67,9 @@ impl Chat {
         self
     }
 
+    #[allow(unused)]
     pub fn max_try(mut self, max_try: usize)->Self {
         self.max_tool_try = max_try;
-        self.client.max_try(self.max_tool_try);
         self
     }
 
@@ -234,11 +232,11 @@ impl Chat {
 mod tests {
     use std::io::{self, Write};
     use futures::{StreamExt, pin_mut};
-    use log::info;
     use crate::{config, mcp, prompt::CHAT_PROMPT};
 
     use super::*;
 
+    #[allow(unused)]
     async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
@@ -257,7 +255,7 @@ mod tests {
                     StreamedChatResponse::Reasoning(think) => print!("{}", think),
                     StreamedChatResponse::ToolResponse(tool) => print!("{}", tool),
                 }
-                io::stdout().flush();
+                io::stdout().flush().unwrap();
             }
         }
         println!("\n流式响应结束");
@@ -283,7 +281,7 @@ mod tests {
                     StreamedChatResponse::Reasoning(think) => print!("{}", think),
                     StreamedChatResponse::ToolResponse(tool) => print!("{}", tool),
                 }
-                io::stdout().flush();
+                io::stdout().flush().unwrap();
             }
         }
         println!("\n非流式响应结束");

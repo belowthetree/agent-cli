@@ -31,21 +31,10 @@ impl ModelMessage {
         Self {
             role: "assistant".into(),
             content,
-            think: "".into(),
+            think: think,
             name: "".into(),
             tool_call_id: "".into(),
             tool_calls,
-        }
-    }
-
-    pub fn assistant_call(tool: ToolCall)->Self {
-        Self {
-            role: "assistant".into(),
-            content: "".into(),
-            think: "".into(),
-            name: "".into(),
-            tool_call_id: tool.id.clone(),
-            tool_calls: Some(vec![tool]),
         }
     }
 
@@ -139,13 +128,4 @@ impl ToolCallFunction {
             arguments: String::new(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelResponse {
-    pub role: String,
-    pub content: String,
-    pub reasoning_content: Option<String>,
-    pub tool_calls: Option<Vec<ToolCall>>,
-    pub finish_reason: Option<String>,
 }

@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::process::exit;
 use clap::{command, Parser};
 use futures::{Stream, StreamExt};
 use futures::pin_mut;
@@ -78,17 +77,17 @@ async fn handle_output(stream: impl Stream<Item = Result<StreamedChatResponse, a
                 StreamedChatResponse::Reasoning(think) => print!("{}", think),
                 StreamedChatResponse::ToolResponse(tool) => print!("{}", tool),
             }
-            io::stdout().flush();
+            io::stdout().flush().unwrap();
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use log::info;
     use crate::{chat::Chat, mcp::internalserver::{getbesttool::GetBestTool, InternalTool}, prompt::CHAT_PROMPT};
     use super::*;
 
+    #[allow(unused)]
     async fn test_select_tool() {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
@@ -97,13 +96,14 @@ mod tests {
         let _ = GetBestTool.call(map).await;
     }
 
+    #[allow(unused)]
     async fn test_search_tool_chat() {
-        // log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
-        // mcp::init().await;
-        // let mut chat = Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.to_string().into())
-        // .tools(mcp::get_basic_tools())
-        // .max_try(1);
-        // let res = chat.chat("你好，帮我查一下github提交信息").await;
-        // info!("{:?}", res);
+        log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
+        mcp::init().await;
+        let mut chat = Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.to_string().into())
+        .tools(mcp::get_basic_tools())
+        .max_try(1);
+        let res = chat.chat("你好，帮我查一下github提交信息");
+        handle_output(res).await;
     }
 }

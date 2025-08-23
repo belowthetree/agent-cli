@@ -1,21 +1,22 @@
 # 🔧 Agent CLI - MCP Protocol Command Line AI Tool
 
-A command line AI tool based on the Model Context Protocol (MCP), providing streaming chat interaction and tool calling capabilities.
+A command-line AI tool based on the MCP (Model Context Protocol) protocol, providing streaming chat interaction and tool calling functionality.
 
-[中文版本](#chinese-version)
+## Demo
+![](docs/agentcli.gif)
 
 ## Features
 
 - ✨ Real-time streaming chat responses
-- ✨ Support for MCP tool calls and reasoning display
+- ✨ Support for MCP tool calling and reasoning process display
 - ✨ Configurable MCP server connections
-- ✨ Built with Rust for high performance and reliability
+- ✨ Built with Rust, high performance and reliable
 
-## 📦 Installation
+## 📦 Installation Guide
 
-### From Source
+### Install from Source
 
-1. Ensure you have Rust installed (version 1.70+ recommended)
+1. Ensure Rust is installed (recommended version 1.70+)
 2. Clone the repository:
    ```bash
    git clone https://github.com/your-repo/agent-cli.git
@@ -25,8 +26,9 @@ A command line AI tool based on the Model Context Protocol (MCP), providing stre
    cd agent-cli
    cargo build --release
    ```
+4. The binary file is located at `target/release/agent-cli`
 
-## 💬 Usage
+## 💬 Usage Instructions
 
 Basic chat interaction:
 ```bash
@@ -35,37 +37,36 @@ agent-cli -p "Your question or instruction"
 
 ## ⚙️ Configuration
 
-Configuration files are stored in `~/.config/agent-cli/config.toml`. You can specify:
+Configuration file is located at `config.toml`, configurable options include:
 - Default MCP servers
-- Connection parameters
-- Logging preferences
+- deepseek_key
 
-## 👨‍💻 Development
+## Parameters
 
-### Building
+* promp User input, required
+* stream Whether to use streaming, defaults to true
+
+## 👨‍💻 Development Guide
+
+### Build
 
 ```bash
 cargo build
 ```
 
-### Running Tests
+### Run Tests
 
 ```bash
 cargo test
 ```
 
-### Logging
+### Log Settings
 
-Set log level with environment variable:
+Set log level via environment variables:
 ```bash
-RUST_LOG=debug agent-cli --prompt "your prompt"
+RUST_LOG=debug agent-cli --prompt "Your prompt"
 ```
 
 ## 📜 License
 
 [GPL_V3](LICENSE)
-
-<a name="chinese-version"></a>
-## Chinese Version
-
-For Chinese documentation, please refer to [README.md](README.md).

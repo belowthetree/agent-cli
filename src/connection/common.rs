@@ -27,6 +27,7 @@ impl SseConnection {
                 yield Err(anyhow::anyhow!(ret));
                 return;
             }
+            info!("开始流式处理");
             // 开始循环解析 sse 流式传输
             let mut stream = response.bytes_stream();
             let mut tool_calls = Vec::new();
@@ -48,6 +49,9 @@ impl SseConnection {
                     let data = line.trim_start_matches("data:").trim();
                     // 处理结束标志
                     if data == "[DONE]" {
+                        for tool in tool_calls {
+                            yield Ok(CommonConnectionContent::ToolCall(tool));
+                        }
                         return;
                     }
                     let json = serde_json::from_str::<Value>(data);
@@ -65,6 +69,9 @@ impl SseConnection {
                         if let Some(finish_reason) = choice.get("finish_reason") {
                             if finish_reason.as_str() == Some("stop") {
                                 yield Ok(CommonConnectionContent::FinishReason("stop".to_string()));
+                                for tool in tool_calls {
+                                    yield Ok(CommonConnectionContent::ToolCall(tool));
+                                }
                                 return;
                             }
                         }
@@ -77,6 +84,9 @@ impl SseConnection {
                             warn!("未知格式 {:?}", choice);
                         }
                         if ret.is_none() {
+                            for tool in tool_calls {
+                                yield Ok(CommonConnectionContent::ToolCall(tool));
+                            }
                             return;
                         }
                         let message = ret.unwrap();
@@ -118,7 +128,6 @@ impl SseConnection {
             for tool in tool_calls {
                 yield Ok(CommonConnectionContent::ToolCall(tool));
             }
-            yield Ok(CommonConnectionContent::Content("".to_string()))
         }
     }
 }

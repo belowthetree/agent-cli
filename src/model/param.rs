@@ -70,6 +70,23 @@ impl ModelMessage {
             tool_calls: None,
         }
     }
+
+    pub fn add_tool(&mut self, tool: ToolCall) {
+        if self.tool_calls.is_none() {
+            self.tool_calls = Some(vec![]);
+        }
+        if let Some(tools) = &mut self.tool_calls {
+            tools.push(tool);
+        }
+    }
+
+    pub fn add_content(&mut self, content: String) {
+        self.content += &content;
+    }
+
+    pub fn add_think(&mut self, think: String) {
+        self.think += &think;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

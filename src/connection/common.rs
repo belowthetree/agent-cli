@@ -35,7 +35,7 @@ impl SseConnection {
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
                     Err(e) => {
-                        yield Err(anyhow::anyhow!("stream error"));
+                        yield Err(anyhow::anyhow!(e.to_string()));
                         continue;
                     }
                 };

@@ -1,7 +1,6 @@
 pub mod mcp_tool;
 pub mod mcp_server;
 pub mod mcp_manager;
-pub mod tool_desc;
 pub mod internalserver;
 
 use log::{info, warn};
@@ -33,6 +32,7 @@ pub async fn init() {
     // let _ = mgr.add_internal_tool(Arc::new(GetBestTool));
 }
 
+#[allow(unused)]
 pub fn get_basic_tools()->Vec<McpTool> {
     vec![
         McpTool::new(GetBestTool.get_mcp_tool(), "".into(), false),

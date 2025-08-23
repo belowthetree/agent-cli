@@ -3,10 +3,6 @@ use std::sync::Arc;
 use crate::mcp::internalserver::InternalTool;
 use crate::{config::McpServerTransportConfig};
 
-struct CommonServer {
-    pub config: McpServerTransportConfig,
-}
-
 #[derive(Debug, Clone)]
 pub enum McpService {
     Common(McpServerTransportConfig),

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use log::info;
 use rmcp::model::{Annotated, CallToolResult, RawContent, RawTextContent, Tool};
@@ -7,6 +5,7 @@ use serde_json::{Map, Value};
 
 use crate::mcp::internalserver::InternalTool;
 
+#[allow(unused)]
 #[derive(Debug)]
 pub struct ChooseTool;
 

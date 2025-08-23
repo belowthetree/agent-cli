@@ -28,36 +28,11 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
     mcp::init().await;
-    let args = Args::parse();
-    if args.stream {
-        stream().await;
-    }
-    else {
-        chat().await;
-    }
-
+    chat().await;
     Ok(())
 }
 
 async fn chat() {
-    // let args = Args::parse();
-    // let config = config::Config::local().unwrap();
-    // let mut chat = chat::Chat::new(config, CHAT_PROMPT.to_string())
-    // .tools(mcp::get_config_tools())
-    // .max_try(3);
-    // let res = chat.chat(&args.prompt.unwrap_or_default()).await;
-    // if res.is_err() {
-    //     println!("{:?}", res.unwrap_err().to_string());
-    //     exit(-1);
-    // } else {
-    //     let res = res.unwrap();
-    //     for r in res {
-    //         println!("{}{}", r.think, r.content);
-    //     }
-    // }
-}
-
-async fn stream() {
     let args = Args::parse();
     let mut chat = chat::Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.into());
     if args.stream {

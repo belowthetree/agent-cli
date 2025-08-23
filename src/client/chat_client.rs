@@ -22,16 +22,10 @@ pub struct ChatResult {
     pub think: String,
 }
 
-#[derive(Debug)]
-pub enum StreamedChatResponse {
-    Text(String),
-    ToolCall(ToolCall),
-    Reasoning(String),
-}
-
 impl ChatClient {
     pub fn new(key: String, system: String, tools: Vec<McpTool>, max_tool_loop: usize) -> Self {
-        let agent = deepseek::DeepseekModel::new("https://api.deepseek.com".into(), "deepseek-chat".into(), key);
+        // let agent = deepseek::DeepseekModel::new("https://api.deepseek.com".into(), "deepseek-chat".into(), key);
+        let agent = deepseek::DeepseekModel::new("http://localhost:11434/v1".into(), "qwen3:4b".into(), key);
         let mut client = Self {
             agent,
             system,
@@ -51,14 +45,6 @@ impl ChatClient {
 
     pub fn max_try(&mut self, max_tool_loop: usize) {
         self.max_tool_loop = max_tool_loop;
-    }
-
-    pub async fn chat(&mut self, prompt: &str, chat_history: Vec<ModelMessage>) -> anyhow::Result<Vec<ModelMessage>> {
-        let mut tools = Vec::new();
-        for tool in self.tools.iter() {
-            tools.push(tool.clone().into());
-        }
-        self.chat_with_tools(prompt, chat_history, &tools).await
     }
 
     pub fn chat2(&self, messages: Vec<ModelMessage>)->impl Stream<Item = Result<ModelMessage, anyhow::Error>> + '_ {
@@ -92,29 +78,6 @@ impl ChatClient {
             }
             yield Ok(ModelMessage::assistant(content, think, tool_calls.clone()));
         }
-    }
-
-    pub async fn chat_with_tools(&mut self, prompt: &str, mut chat_history: Vec<ModelMessage>, tools: &Vec<Tool>)->anyhow::Result<Vec<ModelMessage>> {
-        if self.system.len() > 0 {
-            chat_history.push(ModelMessage::system(self.system.to_string()));
-        }
-        if prompt.len() > 0 {
-            chat_history.push(ModelMessage::user(prompt.to_string()));
-        }
-        let ts = if tools.len() > 0 {Some(tools.clone())} else {None};
-        let param = ModelInputParam{
-            temperature: None,
-            tools: ts,
-            messages: chat_history.clone(),
-        };
-        let (res, tool_calls) = self.get_model_answer(param).await?;
-        for msg in res.iter() {
-            chat_history.push(msg.clone());
-        }
-        if tool_calls.len() > 0 {
-            self.tool_call(tool_calls, self.max_tool_loop, &mut chat_history, tools).await?;
-        }
-        Ok(chat_history)
     }
 
     // 返回增量

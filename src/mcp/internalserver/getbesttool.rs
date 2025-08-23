@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::{pin_mut, StreamExt};
 use log::info;
 use rmcp::model::{Annotated, RawContent, RawTextContent};
 
-use crate::{chat::Chat, config, mcp::{internalserver::{choosetool::ChooseTool, InternalTool}, McpManager, McpTool}};
+use crate::{chat::Chat, config, mcp::{internalserver::{choosetool::ChooseTool, InternalTool}, McpManager, McpTool}, model::param::ModelMessage};
 
 #[derive(Debug)]
 pub struct GetBestTool;
@@ -31,19 +32,25 @@ impl InternalTool for GetBestTool {
         let mut chat = Chat::new(config, system)
         .tools(vec![McpTool::new(tool.clone(), "".into(), false)]);
         // 开始获取结果
-        let res = chat.chat(prompt).await?;
+        let stream = chat.chat(prompt);
+        pin_mut!(stream);
+        let mut result = String::new();
+        while let Some(tmp) = stream.next().await {
+            if let Ok(t) = tmp {
+                match t {
+                    crate::chat::StreamedChatResponse::Text(text) => {
+                        result = text;
+                        break;
+                    },
+                    _ => {},
+                }
+            }
+        }
         // 获取完毕后清理下临时接口
         McpManager::global().remove_tool(&tool.name)?;
-        let mut arr: Vec<String> = Vec::new();
-        if res.len() > 0 {
-            let selects = res.get(res.len() - 1).unwrap();
-            info!("获取最佳工具：{:?}", selects);
-            arr.push(selects.content.clone());
-        }
+        info!("获取最佳工具：{:?}", result);
         let mut res = Vec::new();
-        for s in arr {
-            res.push(Annotated::new(RawContent::Text(RawTextContent { text: s }), None));
-        }
+        res.push(Annotated::new(RawContent::Text(RawTextContent { text: result }), None));
         Ok(rmcp::model::CallToolResult {
             content: res,
             structured_content: None,

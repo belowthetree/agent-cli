@@ -1,9 +1,5 @@
-use std::io::{self, Write};
 use clap::{command, Parser};
-use futures::{Stream, StreamExt};
-use futures::pin_mut;
-
-use crate::chat::StreamedChatResponse;
+use crate::client::handle_output;
 use crate::prompt::CHAT_PROMPT;
 mod config;
 mod chat;
@@ -12,6 +8,7 @@ mod mcp;
 mod model;
 mod connection;
 mod prompt;
+mod tui;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -19,7 +16,7 @@ struct Args {
     /// 提示词
     #[arg(short, long)]
     prompt: Option<String>,
-    /// 值
+    /// 是否流式输出
     #[arg(short, long, default_value_t = true)]
     stream: bool,
 }
@@ -28,7 +25,13 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
     mcp::init().await;
-    chat().await;
+    let args = Args::parse();
+    if args.prompt.is_none() {
+        let _ = tui::run().await;
+    }
+    else {
+        chat().await;
+    }
     Ok(())
 }
 
@@ -39,21 +42,6 @@ async fn chat() {
         handle_output(chat.stream_chat(&args.prompt.unwrap_or_default())).await;
     } else {
         handle_output(chat.chat(&args.prompt.unwrap_or_default())).await;
-    }
-}
-
-async fn handle_output(stream: impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_) {
-    pin_mut!(stream);
-    while let Some(result) = stream.next().await {
-        if let Ok(res) = result {
-            match res {
-                StreamedChatResponse::Text(text) => print!("{}", text),
-                StreamedChatResponse::ToolCall(tool_call) => print!("{}", tool_call),
-                StreamedChatResponse::Reasoning(think) => print!("{}", think),
-                StreamedChatResponse::ToolResponse(tool) => print!("{}", tool),
-            }
-            io::stdout().flush().unwrap();
-        }
     }
 }
 

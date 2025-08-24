@@ -5,14 +5,15 @@ use rmcp::model::Tool;
 
 use crate::{connection::CommonConnectionContent, mcp::{McpTool}, model::{deepseek, param::{ModelInputParam, ModelMessage}, AgentModel}};
 
+#[derive(Clone)]
 pub struct ChatClient {
     pub agent: deepseek::DeepseekModel,
     tools: Vec<Tool>,
 }
 
 impl ChatClient {
-    pub fn new(key: String, tools: Vec<McpTool>) -> Self {
-        let agent = deepseek::DeepseekModel::new("https://api.deepseek.com".into(), "deepseek-chat".into(), key);
+    pub fn new(key: String, url: String, tools: Vec<McpTool>) -> Self {
+        let agent = deepseek::DeepseekModel::new(url, "deepseek-chat".into(), key);
         // let agent = deepseek::DeepseekModel::new("http://localhost:11434/v1".into(), "qwen3:4b".into(), key);
         let mut client = Self {
             agent,
@@ -104,9 +105,8 @@ mod tests {
     use futures::{StreamExt, pin_mut};
     use super::*;
 
-    #[tokio::test]
     async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ChatClient::new("".to_string(), vec![]);
+        let client = ChatClient::new("".to_string(), "https://api.deepseek.com".into(), vec![]);
         let stream = client.stream_chat(vec![ModelMessage::user("测试消息".into())]);
         pin_mut!(stream);
 

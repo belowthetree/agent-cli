@@ -71,7 +71,7 @@ impl McpServerTransportConfig {
 pub struct Config {
     pub mcp: Option<McpConfig>,
     pub deepseek_key: String,
-    pub deepseek_base_url: Option<String>,
+    pub url: Option<String>,
     #[serde(default)]
     pub max_tool_try: usize,
 }

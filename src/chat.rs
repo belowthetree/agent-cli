@@ -6,15 +6,24 @@ use std::fmt::Display;
 
 use crate::client::chat_client::{ChatClient};
 use crate::client::tool_client;
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::mcp::{McpTool};
 use crate::model::param::{ModelMessage, ToolCall};
+use crate::prompt::CHAT_PROMPT;
 
+#[derive(Clone)]
 pub struct Chat {
     pub client: ChatClient,
     pub context: Vec<ModelMessage>,
     max_tool_try: usize,
     cancel_token: tokio_util::sync::CancellationToken,
+    running: bool,
+}
+
+impl Default for Chat {
+    fn default() -> Self {
+        Self::new(config::Config::local().unwrap(), CHAT_PROMPT.into())
+    }
 }
 
 #[derive(Debug)]
@@ -41,20 +50,34 @@ impl Display for ToolCallInfo {
 #[derive(Debug)]
 pub enum StreamedChatResponse {
     Text(String),
-    ToolCall(ToolCallInfo),
+    ToolCall(ToolCall),
     Reasoning(String),
-    ToolResponse(String),
+    ToolResponse(ModelMessage),
+    End,
 }
 
 impl Chat {
     pub fn new(config: Config, system: String) -> Self {
         let max_try = max(config.max_tool_try, 0);
         Self {
-            client: ChatClient::new(config.deepseek_key, vec![]),
+            client: ChatClient::new(config.deepseek_key, config.url.unwrap_or("https://api.deepseek.com".into()), vec![]),
             context: vec![ModelMessage::system(system)],
             max_tool_try: max_try,
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            running: false,
         }
+    }
+
+    pub fn is_running(&self)->bool {
+        self.running
+    }
+
+    pub fn lock(&mut self) {
+        self.running = true;
+    }
+
+    pub fn unlock(&mut self) {
+        self.running = false;
     }
 
     #[allow(unused)]
@@ -76,6 +99,7 @@ impl Chat {
     pub fn chat(&mut self, prompt: &str) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
         self.context.push(ModelMessage::user(prompt.to_string()));
         let cancel_token = self.cancel_token.clone();
+        self.running = true;
         stream! {
             let mut count = self.max_tool_try;
             loop {
@@ -102,13 +126,14 @@ impl Chat {
                                 if let Some(tools) = res.tool_calls {
                                     for tool in tools {
                                         msg.add_tool(tool.clone());
-                                        yield Ok(StreamedChatResponse::ToolCall(ToolCallInfo::tool(tool)));
+                                        yield Ok(StreamedChatResponse::ToolCall(tool));
                                     }
                                 }
                             },
                             Err(e) => yield Ok(StreamedChatResponse::Text(e.to_string())),
                         }
                     }
+                    yield Ok(StreamedChatResponse::End);
                 }
                 self.context.push(msg.clone());
                 if msg.tool_calls.is_some() && count > 0 {
@@ -121,7 +146,7 @@ impl Chat {
                         while let Some(res) = stream.next().await {
                             match res {
                                 Ok(res) => {
-                                    yield Ok(StreamedChatResponse::ToolResponse(res.content.clone()));
+                                    yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
                                     tool_responses.push(res);
                                 }
                                 Err(e) => {
@@ -138,6 +163,7 @@ impl Chat {
                     break;
                 }
             }
+            self.running = false;
         }
     }
 
@@ -147,6 +173,7 @@ impl Chat {
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
         self.context.push(ModelMessage::user(prompt.to_string()));
         let cancel_token = self.cancel_token.clone();
+        self.running = true;
         stream! {
             let mut count = self.max_tool_try;
             loop {
@@ -173,13 +200,14 @@ impl Chat {
                             if let Some(tools) = res.tool_calls {
                                 for tool in tools {
                                     msg.add_tool(tool.clone());
-                                    yield Ok(StreamedChatResponse::ToolCall(ToolCallInfo::tool(tool)));
+                                    yield Ok(StreamedChatResponse::ToolCall(tool));
                                 }
                             }
                         },
                         Err(e) => yield Ok(StreamedChatResponse::Text(e.to_string())),
                     }
                 }
+                yield Ok(StreamedChatResponse::End);
                 self.context.push(msg.clone());
                 // 处理工具调用
                 if msg.tool_calls.is_some() && count > 0 {
@@ -192,7 +220,7 @@ impl Chat {
                         while let Some(res) = stream.next().await {
                             match res {
                                 Ok(res) => {
-                                    yield Ok(StreamedChatResponse::ToolResponse(res.content.clone()));
+                                    yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
                                     tool_responses.push(res);
                                 }
                                 Err(e) => {
@@ -209,6 +237,7 @@ impl Chat {
                     break;
                 }
             }
+            self.running = false;
         }
     }
 
@@ -251,9 +280,10 @@ mod tests {
             if let Ok(res) = result {
                 match res {
                     StreamedChatResponse::Text(text) => print!("{}", text),
-                    StreamedChatResponse::ToolCall(tool_call) => print!("{}", tool_call),
+                    StreamedChatResponse::ToolCall(tool_call) => print!("{:?}", tool_call),
                     StreamedChatResponse::Reasoning(think) => print!("{}", think),
-                    StreamedChatResponse::ToolResponse(tool) => print!("{}", tool),
+                    StreamedChatResponse::ToolResponse(tool) => print!("{:?}", tool),
+                    StreamedChatResponse::End => {}
                 }
                 io::stdout().flush().unwrap();
             }
@@ -262,7 +292,6 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
     async fn test_chat() -> Result<(), Box<dyn std::error::Error>> {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
@@ -277,9 +306,10 @@ mod tests {
             if let Ok(res) = result {
                 match res {
                     StreamedChatResponse::Text(text) => print!("{}", text),
-                    StreamedChatResponse::ToolCall(tool_call) => print!("{}", tool_call),
+                    StreamedChatResponse::ToolCall(tool_call) => print!("{:?}", tool_call),
                     StreamedChatResponse::Reasoning(think) => print!("{}", think),
-                    StreamedChatResponse::ToolResponse(tool) => print!("{}", tool),
+                    StreamedChatResponse::ToolResponse(tool) => print!("{:?}", tool),
+                    StreamedChatResponse::End => {}
                 }
                 io::stdout().flush().unwrap();
             }

@@ -13,7 +13,7 @@ impl MessageText {
         }
     }
 
-    pub fn lines(&self)->Vec<Line> {
+    pub fn lines(&'_ self)->Vec<Line<'_>> {
         vec![Line::styled(std::borrow::Cow::Owned(self.msg.content.clone()), Style::new().cyan())]
     }
 }

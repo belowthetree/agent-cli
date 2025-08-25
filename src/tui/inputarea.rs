@@ -3,8 +3,6 @@ use std::char;
 use log::info;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 
-use crate::tui::get_char_width;
-
 #[derive(Clone)]
 pub struct InputArea {
     pub content: String,

@@ -2,7 +2,6 @@ use async_stream::stream;
 use futures::{pin_mut, Stream, StreamExt};
 use log::info;
 use std::cmp::max;
-use std::fmt::Display;
 
 use crate::client::chat_client::{ChatClient};
 use crate::client::tool_client;
@@ -23,27 +22,6 @@ pub struct Chat {
 impl Default for Chat {
     fn default() -> Self {
         Self::new(config::Config::local().unwrap(), CHAT_PROMPT.into())
-    }
-}
-
-#[derive(Debug)]
-pub struct ToolCallInfo {
-    pub name: String,
-    pub content: String,
-}
-
-impl ToolCallInfo {
-    pub fn tool(tool: ToolCall)->Self {
-        Self {
-            name: tool.function.name,
-            content: tool.function.arguments.to_string(),
-        }
-    }
-}
-
-impl Display for ToolCallInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "调用：{}\n参数：{}\n", self.name, self.content)
     }
 }
 
@@ -292,6 +270,7 @@ mod tests {
         Ok(())
     }
 
+    #[allow(unused)]
     async fn test_chat() -> Result<(), Box<dyn std::error::Error>> {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;

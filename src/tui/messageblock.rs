@@ -51,6 +51,7 @@ impl MessageBlock {
         // 至少 4 行
         let mut height = 3;
         let mut width_count = 0;
+        let start_line = start_line + height;
         for char in chars {
             if height >= start_line {
                 content.push(char);

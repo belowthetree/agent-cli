@@ -12,8 +12,8 @@ pub struct ChatClient {
 }
 
 impl ChatClient {
-    pub fn new(key: String, url: String, tools: Vec<McpTool>) -> Self {
-        let agent = deepseek::DeepseekModel::new(url, "deepseek-chat".into(), key);
+    pub fn new(key: String, url: String, model: String, tools: Vec<McpTool>) -> Self {
+        let agent = deepseek::DeepseekModel::new(url, model, key);
         // let agent = deepseek::DeepseekModel::new("http://localhost:11434/v1".into(), "qwen3:4b".into(), key);
         let mut client = Self {
             agent,
@@ -105,8 +105,9 @@ mod tests {
     use futures::{StreamExt, pin_mut};
     use super::*;
 
+    #[allow(unused)]
     async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ChatClient::new("".to_string(), "https://api.deepseek.com".into(), vec![]);
+        let client = ChatClient::new("".to_string(), "https://api.deepseek.com".into(), "deepseek-chat".into(), vec![]);
         let stream = client.stream_chat(vec![ModelMessage::user("测试消息".into())]);
         pin_mut!(stream);
 

@@ -1,1 +1,3 @@
 deepseek_key = ""
+model = "deepseek-chat"
+url = "https://api.deepseek.com"

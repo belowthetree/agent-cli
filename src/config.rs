@@ -72,6 +72,7 @@ pub struct Config {
     pub mcp: Option<McpConfig>,
     pub deepseek_key: String,
     pub url: Option<String>,
+    pub model: Option<String>,
     #[serde(default)]
     pub max_tool_try: usize,
 }

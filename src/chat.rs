@@ -38,7 +38,12 @@ impl Chat {
     pub fn new(config: Config, system: String) -> Self {
         let max_try = max(config.max_tool_try, 0);
         Self {
-            client: ChatClient::new(config.deepseek_key, config.url.unwrap_or("https://api.deepseek.com".into()), vec![]),
+            client: ChatClient::new(
+                config.deepseek_key,
+                config.url.unwrap_or("https://api.deepseek.com".into()),
+                config.model.unwrap_or("deepseek-chat".into()),
+                vec![],
+            ),
             context: vec![ModelMessage::system(system)],
             max_tool_try: max_try,
             cancel_token: tokio_util::sync::CancellationToken::new(),

@@ -68,7 +68,7 @@ impl App {
                 // 如果前面的文字显示出框，挑后面的显示
                 if block_start_line < st {
                     // +3 往后一点，不然显示有问题
-                    blk.render_block(blk_area, frame.buffer_mut(), st - block_start_line + 3, blk_area.width);
+                    blk.render_block(blk_area, frame.buffer_mut(), st - block_start_line, blk_area.width);
                 }
                 else {
                     frame.render_widget(blk, blk_area);

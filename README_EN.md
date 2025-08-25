@@ -5,12 +5,15 @@ A command-line AI tool based on the MCP (Model Context Protocol) protocol, provi
 ## Demo
 ![](docs/agentcli.gif)
 
+![](docs/tui.gif)
+
 ## Features
 
 - ✨ Real-time streaming chat responses
 - ✨ Support for MCP tool calling and reasoning process display
 - ✨ Configurable MCP server connections
 - ✨ Built with Rust, high performance and reliable
+- ✨ Support for interactive terminal ui
 
 ## 📦 Installation Guide
 

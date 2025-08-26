@@ -22,3 +22,23 @@ pub async fn handle_output(stream: impl Stream<Item = Result<StreamedChatRespons
         }
     }
 }
+
+#[allow(unused)]
+pub async fn get_output_tostring(stream: impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_)->String {
+    pin_mut!(stream);
+    let mut ret = String::new();
+    while let Some(result) = stream.next().await {
+        if let Ok(res) = result {
+            match res {
+                StreamedChatResponse::Text(text) => ret += &text,
+                _ => {}
+                // StreamedChatResponse::ToolCall(tool_call) => print!("{:?}", tool_call),
+                // StreamedChatResponse::Reasoning(think) => print!("{}", think),
+                // StreamedChatResponse::ToolResponse(tool) => print!("{:?}", tool),
+                // StreamedChatResponse::End => {}
+            }
+            io::stdout().flush().unwrap();
+        }
+    }
+    ret
+}

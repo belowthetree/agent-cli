@@ -20,7 +20,7 @@ pub fn get_char_width(c: char)->u16 {
 mod test {
     use super::*;
 
-    #[tokio::test]
+    #[allow(unused)]
     async fn test_window() {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         color_eyre::install().unwrap();

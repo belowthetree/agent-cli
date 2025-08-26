@@ -17,6 +17,8 @@ pub struct Chat {
     max_tool_try: usize,
     cancel_token: tokio_util::sync::CancellationToken,
     running: bool,
+    /// 最大保存上下文数量
+    max_context_num: usize,
 }
 
 impl Default for Chat {
@@ -48,6 +50,7 @@ impl Chat {
             max_tool_try: max_try,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             running: false,
+            max_context_num: max(config.max_context_num, 5),
         }
     }
 
@@ -63,7 +66,6 @@ impl Chat {
         self.running = false;
     }
 
-    #[allow(unused)]
     pub fn cancel(&self) {
         self.cancel_token.cancel();
     }
@@ -80,7 +82,7 @@ impl Chat {
     }
 
     pub fn chat(&mut self, prompt: &str) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        self.context.push(ModelMessage::user(prompt.to_string()));
+        self.add_message(ModelMessage::user(prompt.to_string()));
         let cancel_token = self.cancel_token.clone();
         self.running = true;
         stream! {
@@ -118,7 +120,7 @@ impl Chat {
                     }
                     yield Ok(StreamedChatResponse::End);
                 }
-                self.context.push(msg.clone());
+                self.add_message(msg.clone());
                 if msg.tool_calls.is_some() && count > 0 {
                     count -= 1;
                     let tool_calls = msg.tool_calls.unwrap();
@@ -139,7 +141,7 @@ impl Chat {
                         }
                     }
                     for response in tool_responses {
-                        self.context.push(response);
+                        self.add_message(response);
                     }
                 }
                 else {
@@ -154,7 +156,7 @@ impl Chat {
         &mut self,
         prompt: &str,
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        self.context.push(ModelMessage::user(prompt.to_string()));
+        self.add_message(ModelMessage::user(prompt.to_string()));
         let cancel_token = self.cancel_token.clone();
         self.running = true;
         stream! {
@@ -192,7 +194,11 @@ impl Chat {
                 }
                 yield Ok(StreamedChatResponse::End);
                 self.context.push(msg.clone());
+                if self.context.len() > self.max_context_num {
+                    self.context.remove(0);
+                }
                 // 处理工具调用
+                info!("工具数 {:?}", msg.tool_calls);
                 if msg.tool_calls.is_some() && count > 0 {
                     count -= 1;
                     let tool_calls = msg.tool_calls.unwrap();
@@ -214,6 +220,9 @@ impl Chat {
                     }
                     for response in tool_responses {
                         self.context.push(response);
+                        if self.context.len() > self.max_context_num {
+                            self.context.remove(0);
+                        }
                     }
                 }
                 else {
@@ -236,6 +245,13 @@ impl Chat {
                 }
                 yield res;
             }
+        }
+    }
+
+    fn add_message(&mut self, msg: ModelMessage) {
+        self.context.push(msg);
+        if self.context.len() > self.max_context_num {
+            self.context.remove(0);
         }
     }
 }

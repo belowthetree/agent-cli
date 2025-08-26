@@ -1,6 +1,7 @@
 .vscode
 /target
-config.toml
-*.log
 /log
+config.toml
+napcat.toml
+*.log
 *.exe

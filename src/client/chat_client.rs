@@ -19,6 +19,7 @@ impl ChatClient {
             agent,
             tools: vec![],
         };
+        info!("{:?}", tools);
         client.tools(tools);
         client
     }

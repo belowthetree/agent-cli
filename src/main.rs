@@ -19,11 +19,11 @@ struct Args {
     #[arg(short, long)]
     prompt: Option<String>,
     /// 是否流式输出（默认流式）
-    #[arg(short, long, default_value_t = true)]
-    stream: bool,
+    #[arg(short, long, default_value = "true")]
+    stream: Option<bool>,
     /// 是否使用工具（默认使用）
-    #[arg(short, long, default_value_t = true)]
-    use_tool: bool,
+    #[arg(short, long, default_value = "true")]
+    use_tool: Option<bool>,
     #[cfg(feature = "napcat")]
     #[arg(short, long, default_value_t = false)]
     napcat: bool,
@@ -52,10 +52,10 @@ async fn main() -> anyhow::Result<()> {
 async fn chat() {
     let args = Args::parse();
     let mut chat = chat::Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.into());
-    if args.use_tool {
+    if Some(true) == args.use_tool {
         chat = chat.tools(mcp::get_config_tools());
     }
-    if args.stream {
+    if Some(true) == args.stream {
         handle_output(chat.stream_chat(&args.prompt.unwrap_or_default())).await;
     } else {
         handle_output(chat.chat(&args.prompt.unwrap_or_default())).await;

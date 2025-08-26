@@ -87,8 +87,8 @@ pub struct Config {
 
 impl Config {
     pub fn local() -> Result<Self, Box<dyn std::error::Error>> {
-        let config_content = fs::read_to_string("config.toml").expect("找不到 config.toml 文件");
-        let config_file: Self = toml::from_str(&config_content)?;
+        let config_content = fs::read_to_string("config.json").expect("找不到 config.json 文件");
+        let config_file: Self = serde_json::from_str(&config_content)?;
         Ok(config_file)
     }
 }

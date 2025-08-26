@@ -23,12 +23,11 @@ impl MessageBlock {
         // 至少 4 行
         let mut height = 3;
         let mut width_count = 0;
-        let mut count = 0;
         for char in self.message.content.chars() {
             let width = get_char_width(char);
-            debug!("{} {}", char, width);
+            // debug!("{} {}", char, width);
             if width_count + width > viewwidth {
-                info!("换行！！{}", char);
+                // debug!("换行！！{}", char);
                 height += 1;
                 width_count = width_count + width - viewwidth;
             }
@@ -36,12 +35,11 @@ impl MessageBlock {
                 width_count += width;
             }
             if char == '\n' {
-                count += 1;
                 width_count = 0;
                 height += 1;
             }
         }
-        info!("{} {}", count, height);
+        // debug!("{} {}", count, height);
         height
     }
 
@@ -59,7 +57,6 @@ impl MessageBlock {
             else {
                 let width = get_char_width(char);
                 if width_count + width > viewwidth {
-                    info!("换行！！ {} {}", char, width);
                     height += 1;
                     width_count = width;
                 }

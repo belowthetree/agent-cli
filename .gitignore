@@ -3,5 +3,6 @@
 /log
 config.toml
 napcat.toml
+config.json
 *.log
 *.exe

@@ -3,6 +3,9 @@ name = "agent-cli"
 version = "0.4.0"
 edition = "2024"
 
+[features]
+napcat = ["onebot_v11"]
+
 [dependencies]
 rmcp = { version = "0.6.0", features = [
     "client", 
@@ -31,3 +34,4 @@ tokio-util = "0.7.16"
 ratatui = "0.29.0"
 color-eyre = "0.6.5"
 unicode-width = "0.2.0"
+onebot_v11 = {version = "0.1.5", optional = true}

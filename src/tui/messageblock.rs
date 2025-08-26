@@ -72,7 +72,7 @@ impl MessageBlock {
                 }
             }
         }
-        info!("{}", content);
+        debug!("{}", content);
         content
     }
 

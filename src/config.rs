@@ -1,7 +1,7 @@
 use std::fs;
 use rmcp::serde;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, process::Stdio};
+use std::{collections::HashMap};
 use rmcp::{RoleClient, ServiceExt, service::RunningService, transport::ConfigureCommandExt};
 
 // use crate::mcp_adaptor::McpManager;
@@ -56,7 +56,7 @@ impl McpServerTransportConfig {
             } => {
                 let transport = rmcp::transport::TokioChildProcess::new(
                     tokio::process::Command::new(command).configure(|cmd| {
-                        cmd.args(args).envs(envs).stderr(Stdio::null());
+                        cmd.args(args).envs(envs);
                     }),
                 )?;
                 ().serve(transport).await?
@@ -66,6 +66,12 @@ impl McpServerTransportConfig {
     }
 }
 
+fn max_tool_try_default()->usize {
+    3
+}
+fn max_context_num_default()->usize {
+    10
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
@@ -73,8 +79,10 @@ pub struct Config {
     pub deepseek_key: String,
     pub url: Option<String>,
     pub model: Option<String>,
-    #[serde(default)]
+    #[serde(default = "max_tool_try_default")]
     pub max_tool_try: usize,
+    #[serde(default = "max_context_num_default")]
+    pub max_context_num: usize,
 }
 
 impl Config {

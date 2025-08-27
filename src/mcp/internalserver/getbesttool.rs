@@ -26,11 +26,12 @@ impl InternalTool for GetBestTool {
         let tools = McpManager::global().get_all_tool_desc();
         let s = serde_json::to_string(&tools).unwrap();
         let system = PROMPT.to_string() + " 以下是工具列表：\n" + s.as_str();
+        config.prompt = Some(system);
         info!("prompt {}", prompt);
         // 把“选择工具”的接口传给 mcp_manager 和对话器
         let tool = ChooseTool.get_mcp_tool();
         McpManager::global().add_internal_tool(Arc::new(ChooseTool))?;
-        let mut chat = Chat::new(config, system)
+        let mut chat = Chat::new(config)
         .tools(vec![McpTool::new(tool.clone(), "".into(), false)]);
         // 开始获取结果
         let stream = chat.chat(prompt);

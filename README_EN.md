@@ -1,8 +1,11 @@
 # 🔧 Agent CLI - MCP Protocol Command Line AI Tool
 
-A command-line AI tool based on the MCP (Model Context Protocol) protocol, providing streaming chat interaction and tool calling functionality.
+* A command-line AI tool based on the MCP (Model Context Protocol) protocol, providing streaming chat interaction and tool calling functionality.
+* Supports NapCat connection to QQ
 
-## Demo
+[中文版本](#chinese-version)
+
+## Examples
 ![](docs/agentcli.gif)
 
 ![](docs/tui.gif)
@@ -10,10 +13,11 @@ A command-line AI tool based on the MCP (Model Context Protocol) protocol, provi
 ## Features
 
 - ✨ Real-time streaming chat responses
-- ✨ Support for MCP tool calling and reasoning process display
+- ✨ Supports MCP tool calling and reasoning process display
 - ✨ Configurable MCP server connections
 - ✨ Built with Rust, high performance and reliable
-- ✨ Support for interactive terminal ui
+- ✨ Supports command-line interactive interface
+- ✨ Acts as a server to connect with NapCat and respond to QQ @mentions
 
 ## 📦 Installation Guide
 
@@ -24,10 +28,10 @@ A command-line AI tool based on the MCP (Model Context Protocol) protocol, provi
    ```bash
    git clone https://github.com/your-repo/agent-cli.git
    ```
-3. Build the project:
+3. Build the project (NapCat is not compiled by default, need to add parameter --features napcat):
    ```bash
    cd agent-cli
-   cargo build --release
+   cargo build --release --features napcat
    ```
 4. The binary file is located at `target/release/agent-cli`
 
@@ -38,16 +42,15 @@ Basic chat interaction:
 agent-cli -p "Your question or instruction"
 ```
 
-## ⚙️ Configuration
+## ⚙️ Configuration Method
 
-Configuration file is located at `config.toml`, configurable options include:
-- Default MCP servers
-- deepseek_key
+Configuration file is located at `config.json`, specific configuration reference `config_temp.json` file
 
-## Parameters
+## Parameter Description
 
-* promp User input, required
-* stream Whether to use streaming, defaults to true
+* --prompt User input, if not provided, enters command-line interactive UI mode
+* --stream Whether to use streaming, defaults to true
+* --use_tool Whether to use tools, defaults to true
 
 ## 👨‍💻 Development Guide
 
@@ -64,12 +67,13 @@ cargo test
 ```
 
 ### Log Settings
-
-Set log level via environment variables:
-```bash
-RUST_LOG=debug agent-cli --prompt "Your prompt"
-```
+Set log level and output in `log4rs.yaml`
 
 ## 📜 License
 
 [GPL_V3](LICENSE)
+
+<a name="chinese-version"></a>
+## Chinese Version
+
+For Chinese documentation, please refer to [README.md](README.md).

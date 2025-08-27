@@ -76,13 +76,14 @@ fn max_context_num_default()->usize {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub mcp: Option<McpConfig>,
-    pub deepseek_key: String,
+    pub api_key: String,
     pub url: Option<String>,
     pub model: Option<String>,
     #[serde(default = "max_tool_try_default")]
     pub max_tool_try: usize,
     #[serde(default = "max_context_num_default")]
     pub max_context_num: usize,
+    pub prompt: Option<String>,
 }
 
 impl Config {

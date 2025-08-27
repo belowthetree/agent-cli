@@ -1,0 +1,10 @@
+{
+  "api_key": "",
+  "model": "deepseek-chat",
+  "url": "https://api.deepseek.com",
+  "max_context_num": 10,
+  "mcp": {
+    "server": [
+    ]
+  }
+}

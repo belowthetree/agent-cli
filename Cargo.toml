@@ -4,6 +4,7 @@ version = "0.5.0"
 edition = "2024"
 
 [features]
+default = ["napcat"]
 napcat = ["onebot_v11"]
 
 [dependencies]

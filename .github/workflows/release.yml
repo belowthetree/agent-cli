@@ -24,7 +24,7 @@ jobs:
           override: true
 
       - name: Build release
-        run: cargo build --release
+        run: cargo build --release --features napcat
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

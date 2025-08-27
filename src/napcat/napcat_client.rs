@@ -1,6 +1,7 @@
 use log::info;
 use onebot_v11::{api::payload::{ApiPayload, SendGroupForwardMsg}, connect::{ws_reverse::{self, ReverseWsConfig}}, MessageSegment};
-
+use crate::{mcp, Args};
+use clap::Parser;
 use crate::{chat::Chat, client::get_output_tostring, napcat::{self, napcatconfig::NapCatConfig}};
 
 pub struct NapCatClient {
@@ -10,16 +11,23 @@ pub struct NapCatClient {
 
 impl NapCatClient {
     pub fn new(config: NapCatConfig) -> Self {
+        let mut chat = Chat::default();
+        let args = Args::parse();
+        if Some(true) == args.use_tool {
+            chat = chat.tools(mcp::get_config_tools());
+        }
         Self {
             config,
-            chat: Chat::default(),
+            chat,
         }
     }
 
     pub async fn start(&mut self) {
+        println!("开始监听 napcat");
         let catconfig = napcat::napcatconfig::NapCatConfig::local().expect("未配置 napcat.toml");
         let mut cfg = ReverseWsConfig::default();
         cfg.access_token = Some(catconfig.token.clone());
+        println!("地址配置：{}:{} token:{}", cfg.host, cfg.port, cfg.access_token.clone().unwrap());
         let conn = ws_reverse::ReverseWsConnect::new(cfg).await.unwrap();
         let mut revc = conn.subscribe().await;
         loop {

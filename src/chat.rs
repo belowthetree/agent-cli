@@ -23,7 +23,7 @@ pub struct Chat {
 
 impl Default for Chat {
     fn default() -> Self {
-        Self::new(config::Config::local().unwrap(), CHAT_PROMPT.into())
+        Self::new(config::Config::local().unwrap())
     }
 }
 
@@ -37,16 +37,16 @@ pub enum StreamedChatResponse {
 }
 
 impl Chat {
-    pub fn new(config: Config, system: String) -> Self {
+    pub fn new(config: Config) -> Self {
         let max_try = max(config.max_tool_try, 0);
         Self {
             client: ChatClient::new(
-                config.deepseek_key,
+                config.api_key,
                 config.url.unwrap_or("https://api.deepseek.com".into()),
                 config.model.unwrap_or("deepseek-chat".into()),
                 vec![],
             ),
-            context: vec![ModelMessage::system(system)],
+            context: vec![ModelMessage::system(config.prompt.unwrap_or(CHAT_PROMPT.into()))],
             max_tool_try: max_try,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             running: false,
@@ -71,6 +71,7 @@ impl Chat {
     }
 
     pub fn tools(mut self, tools: Vec<McpTool>)->Self {
+        info!("设置工具 {}", tools.len());
         self.client.tools(tools);
         self
     }
@@ -260,7 +261,7 @@ impl Chat {
 mod tests {
     use std::io::{self, Write};
     use futures::{StreamExt, pin_mut};
-    use crate::{config, mcp, prompt::CHAT_PROMPT};
+    use crate::{config, mcp};
 
     use super::*;
 
@@ -268,7 +269,7 @@ mod tests {
     async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
-        let mut chat = Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.into())
+        let mut chat = Chat::new(config::Config::local().unwrap())
         .tools(mcp::get_config_tools())
         .max_try(1);
         let stream = chat.stream_chat("请将“你好世界”写入到 E:\\Project\\temp\\test.txt 中");
@@ -295,7 +296,7 @@ mod tests {
     async fn test_chat() -> Result<(), Box<dyn std::error::Error>> {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
-        let mut chat = Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.into())
+        let mut chat = Chat::new(config::Config::local().unwrap())
         .tools(mcp::get_config_tools())
         .max_try(1);
         let stream = chat.chat("请将“你好世界”写入到 E:\\Project\\temp\\test.txt 中");

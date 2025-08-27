@@ -1,6 +1,7 @@
 # 🔧 Agent CLI - MCP协议命令行AI工具
 
-一个基于MCP(Model Context Protocol)协议的命令行AI工具，提供流式聊天交互和工具调用功能。
+* 一个基于MCP(Model Context Protocol)协议的命令行AI工具，提供流式聊天交互和工具调用功能。
+* 支持 NapCat 连接 QQ
 
 [English Version](#english-version)
 
@@ -16,6 +17,7 @@
 - ✨ 可配置的MCP服务器连接
 - ✨ 基于Rust构建，高性能且可靠
 - ✨ 支持命令行交互式界面
+- ✨ 作为服务端与 NapCat 连接响应 QQ @对话
 
 ## 📦 安装指南
 
@@ -26,7 +28,7 @@
    ```bash
    git clone https://github.com/your-repo/agent-cli.git
    ```
-3. 编译项目：
+3. 编译项目（NapCat 默认不编译，需要加上参数 --features napcat）：
    ```bash
    cd agent-cli
    cargo build --release
@@ -42,14 +44,13 @@ agent-cli -p "您的问题或指令"
 
 ## ⚙️ 配置方法
 
-配置文件位于`config.toml`，可配置：
-- 默认MCP服务器
-- deepseek_key
+配置文件位于`config.json`，具体配置参考 `config_temp.json` 文件
 
-## 参数
+## 参数说明
 
-* promp 用户输入，必选
-* stream 是否流式，默认为 true
+* --promp 用户输入，不填则进入命令行交互 UI 模式
+* --stream 是否流式，默认为 true
+* --use_tool 是否使用工具，默认为 true
 
 ## 👨‍💻 开发指南
 
@@ -66,11 +67,7 @@ cargo test
 ```
 
 ### 日志设置
-
-通过环境变量设置日志级别：
-```bash
-RUST_LOG=debug agent-cli --prompt "您的提示"
-```
+在 `log4rs.yaml` 中设置日志等级、输出
 
 ## 📜 许可证
 

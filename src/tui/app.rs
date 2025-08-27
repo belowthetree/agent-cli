@@ -1,9 +1,9 @@
-use std::{cmp::min, io, sync::{mpsc, Arc, Mutex}, time::Duration};
+use std::{cmp::min, io, sync::{mpsc, Arc, Mutex}};
 
 use clap::Parser;
 use futures::{pin_mut, StreamExt};
 use log::{debug, info};
-use ratatui::{ crossterm::event::{self, poll, Event, KeyCode, KeyEventKind}, symbols::scrollbar, widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState}, DefaultTerminal, Frame};
+use ratatui::{ crossterm::event::{self, Event, KeyCode, KeyEventKind}, symbols::scrollbar, widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState}, DefaultTerminal, Frame};
 
 use crate::{chat::{Chat, StreamedChatResponse}, mcp, model::param::ModelMessage, tui::{inputarea::InputArea, messageblock::MessageBlock}, Args};
 
@@ -22,6 +22,7 @@ pub struct App {
     scroll_down_tx: mpsc::Sender<bool>,
     redraw_rx: mpsc::Receiver<Event>,
     redraw_tx: mpsc::Sender<Event>,
+    dirty: bool,
 }
 
 impl App {
@@ -48,6 +49,7 @@ impl App {
             scroll_down_tx: scroll_tx,
             redraw_rx,
             redraw_tx,
+            dirty: true,
         }
     }
 
@@ -112,12 +114,16 @@ impl App {
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
         let t = tokio::spawn(Self::watch_events(self.redraw_tx.clone()));
         while !self.should_exit {
-            terminal.draw(|frame| {
-                self.render(frame);
-            })?;
+            if self.dirty {
+                terminal.draw(|frame| {
+                    self.render(frame);
+                })?;
+                self.dirty = false;
+            }
             self.handle_events()?;
             // 正在运行的话始终拉到最底部
             if self.scroll_down_rx.try_recv().is_ok() {
+                self.dirty = true;
                 if self.max_line > self.window_height {
                     self.index = self.max_line - self.window_height;
                 }
@@ -136,10 +142,8 @@ impl App {
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
-        if poll(Duration::from_millis(100)).is_err() {
-            return Ok(());
-        }
         if let Ok(Event::Key(key)) = self.redraw_rx.try_recv() {
+            self.dirty = true;
             if key.kind == KeyEventKind::Press {
                 // 如果模型正在运行，优先取消运行
                 if key.code == KeyCode::Esc {
@@ -192,7 +196,12 @@ impl App {
         let ctx = self.chat.lock().unwrap();
         debug!("{:?}", ctx.context);
         for msg in ctx.context.iter() {
-            if msg.role == "system" || msg.role == "user" {
+            // 系统、工具的信息过滤
+            if msg.role == "system" || msg.role == "tool" {
+                continue;
+            }
+            // 空信息也过滤
+            if msg.content.len() <= 0 {
                 continue;
             }
             let block = MessageBlock::new(msg.clone(), self.width);
@@ -227,9 +236,11 @@ impl App {
                             StreamedChatResponse::Text(text) => selfchat.lock().unwrap().context[idx].add_content(text),
                             StreamedChatResponse::ToolCall(tool_call) => selfchat.lock().unwrap().context[idx].add_tool(tool_call),
                             StreamedChatResponse::Reasoning(think) => selfchat.lock().unwrap().context[idx].add_think(think),
-                            StreamedChatResponse::ToolResponse(tool) => selfchat.lock().unwrap().context.push(tool),
-                            StreamedChatResponse::End => {
+                            StreamedChatResponse::ToolResponse(tool) => {
+                                selfchat.lock().unwrap().context.push(tool);
                                 selfchat.lock().unwrap().context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
+                            }
+                            StreamedChatResponse::End => {
                             }
                         }
                     }

@@ -1,6 +1,5 @@
 use clap::{command, Parser};
 use crate::client::handle_output;
-use crate::prompt::CHAT_PROMPT;
 mod config;
 mod chat;
 mod client;
@@ -51,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn chat() {
     let args = Args::parse();
-    let mut chat = chat::Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.into());
+    let mut chat = chat::Chat::new(config::Config::local().unwrap());
     if Some(true) == args.use_tool {
         chat = chat.tools(mcp::get_config_tools());
     }
@@ -64,7 +63,7 @@ async fn chat() {
 
 #[cfg(test)]
 mod tests {
-    use crate::{chat::Chat, mcp::internalserver::{getbesttool::GetBestTool, InternalTool}, prompt::CHAT_PROMPT};
+    use crate::{chat::Chat, mcp::internalserver::{getbesttool::GetBestTool, InternalTool}};
     use super::*;
 
     #[allow(unused)]
@@ -80,7 +79,7 @@ mod tests {
     async fn test_search_tool_chat() {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
-        let mut chat = Chat::new(config::Config::local().unwrap(), CHAT_PROMPT.to_string().into())
+        let mut chat = Chat::new(config::Config::local().unwrap())
         .tools(mcp::get_basic_tools())
         .max_try(1);
         let res = chat.chat("你好，帮我查一下github提交信息");

@@ -2,7 +2,7 @@ use std::{cmp::min, io, sync::{mpsc, Arc, Mutex}};
 
 use clap::Parser;
 use futures::{pin_mut, StreamExt};
-use log::{debug, info};
+use log::{debug};
 use ratatui::{ crossterm::event::{self, Event, KeyCode, KeyEventKind}, symbols::scrollbar, widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState}, DefaultTerminal, Frame};
 
 use crate::{chat::{Chat, StreamedChatResponse}, mcp, model::param::ModelMessage, tui::{inputarea::InputArea, messageblock::MessageBlock}, Args};

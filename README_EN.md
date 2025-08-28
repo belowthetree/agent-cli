@@ -3,7 +3,7 @@
 * A command-line AI tool based on the MCP (Model Context Protocol) protocol, providing streaming chat interaction and tool calling functionality.
 * Supports NapCat connection to QQ
 
-[中文版本](#chinese-version)
+[中文版本](README.md).
 
 ## Examples
 ![](docs/agentcli.gif)
@@ -76,4 +76,3 @@ Set log level and output in `log4rs.yaml`
 <a name="chinese-version"></a>
 ## Chinese Version
 
-For Chinese documentation, please refer to [README.md](README.md).

@@ -3,7 +3,7 @@
 * 一个基于MCP(Model Context Protocol)协议的命令行AI工具，提供流式聊天交互和工具调用功能。
 * 支持 NapCat 连接 QQ
 
-[English Version](#english-version)
+[English Version](README_EN.md).
 
 ## 示例
 ![](docs/agentcli.gif)
@@ -73,7 +73,3 @@ cargo test
 
 [GPL_V3](LICENSE)
 
-<a name="english-version"></a>
-## English Version
-
-For English documentation, please refer to [README_EN.md](README_EN.md).

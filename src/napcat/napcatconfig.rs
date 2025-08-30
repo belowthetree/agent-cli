@@ -1,9 +1,8 @@
-
-use std::{fs};
-use onebot_v11::{event::message::GroupMessage, MessageSegment};
+use onebot_v11::{MessageSegment, event::message::GroupMessage};
 use serde::{Deserialize, Serialize};
+use std::fs;
 
-fn token_default()->String {
+fn token_default() -> String {
     "123456".into()
 }
 
@@ -14,10 +13,11 @@ pub struct NapCatConfig {
     pub self_qq: i64,
     #[serde(default = "token_default")]
     pub token: String,
+    pub port: Option<u16>,
 }
 
 impl NapCatConfig {
-    pub fn local()->Result<Self, anyhow::Error> {
+    pub fn local() -> Result<Self, anyhow::Error> {
         let config_content = fs::read_to_string("napcat.toml").expect("找不到 napcat.toml 文件");
         let config_file: Self = toml::from_str(&config_content)?;
         Ok(config_file)
@@ -27,7 +27,7 @@ impl NapCatConfig {
         self.target_qq.contains(&user_id)
     }
 
-    pub fn is_group_at_self(&self, msg: GroupMessage)->bool {
+    pub fn is_group_at_self(&self, msg: GroupMessage) -> bool {
         if !self.is_target_user(msg.user_id) {
             return false;
         }

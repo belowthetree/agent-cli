@@ -1,13 +1,12 @@
-use std::fs;
 use rmcp::serde;
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap};
 use rmcp::{RoleClient, ServiceExt, service::RunningService, transport::ConfigureCommandExt};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
 
 // use crate::mcp_adaptor::McpManager;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct McpServerConfig {
-    pub name: String,
     #[serde(default)]
     pub description: String,
     #[serde(flatten)]
@@ -15,13 +14,13 @@ pub struct McpServerConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "protocol", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", untagged)]
 pub enum McpServerTransportConfig {
     Streamable {
         url: String,
     },
     Sse {
-        url: String,
+        sse: String,
     },
     Stdio {
         command: String,
@@ -34,7 +33,7 @@ pub enum McpServerTransportConfig {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct McpConfig {
-    pub server: Vec<McpServerConfig>,
+    pub server: HashMap<String, McpServerConfig>,
 }
 
 impl McpServerTransportConfig {
@@ -45,8 +44,8 @@ impl McpServerTransportConfig {
                     rmcp::transport::StreamableHttpClientTransport::from_uri(url.to_string());
                 ().serve(transport).await?
             }
-            McpServerTransportConfig::Sse { url } => {
-                let transport = rmcp::transport::SseClientTransport::start(url.to_string()).await?;
+            McpServerTransportConfig::Sse { sse } => {
+                let transport = rmcp::transport::SseClientTransport::start(sse.to_string()).await?;
                 ().serve(transport).await?
             }
             McpServerTransportConfig::Stdio {
@@ -66,15 +65,22 @@ impl McpServerTransportConfig {
     }
 }
 
-fn max_tool_try_default()->usize {
+fn max_tool_try_default() -> usize {
     3
 }
-fn max_context_num_default()->usize {
+fn max_context_num_default() -> usize {
     10
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct EnvConfig {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
+    #[serde(default)]
     pub mcp: Option<McpConfig>,
     pub api_key: String,
     pub url: Option<String>,
@@ -84,6 +90,8 @@ pub struct Config {
     #[serde(default = "max_context_num_default")]
     pub max_context_num: usize,
     pub prompt: Option<String>,
+    #[serde(default)]
+    pub envs: Vec<EnvConfig>,
 }
 
 impl Config {

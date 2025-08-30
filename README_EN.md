@@ -24,7 +24,7 @@
 
 ### Install from Source
 
-1. Ensure Rust is installed (recommended version 1.70+)
+1. Ensure Rust is installed
 2. Clone the repository:
    ```bash
    git clone https://github.com/your-repo/agent-cli.git

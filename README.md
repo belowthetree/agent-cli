@@ -24,7 +24,7 @@
 
 ### 从源码安装
 
-1. 确保已安装Rust(推荐1.70+版本)
+1. 确保已安装Rust
 2. 克隆仓库：
    ```bash
    git clone https://github.com/your-repo/agent-cli.git

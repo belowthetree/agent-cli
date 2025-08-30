@@ -36,6 +36,9 @@
    ```
 4. 二进制文件位于`target/release/agent-cli`
 
+5. 将 config_temp.json 改名为 config.json，填入你在 deepseek 官网注册的 api_key，确保你的本地有 config.json、log4rs.yaml 两个文件
+   如果你需要使用 napcat，运行的时候加上参数 `--napcat`，然后将 napcat_temp.toml 改名为 napcat.toml，它将只处理配置中的 target_qq 发送的信息
+
 ## 💬 使用说明
 
 基本聊天交互：

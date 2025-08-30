@@ -1,6 +1,6 @@
 # 🔧 Agent CLI - MCP Protocol Command Line AI Tool
 
-* a simple mcp client make by rust
+* A lightweight Rust-based MCP client
 * A command-line AI tool based on the MCP (Model Context Protocol) protocol, providing streaming chat interaction and tool calling functionality.
 * Supports NapCat connection to QQ
 
@@ -18,7 +18,7 @@
 - ✨ Configurable MCP server connections
 - ✨ Built with Rust, high performance and reliable
 - ✨ Supports command-line interactive interface
-- ✨ Acts as a server to connect with NapCat and respond to QQ @mentions
+- ✨ Acts as a server to connect with NapCat and respond to QQ @ messages
 
 ## 📦 Installation Guide
 
@@ -35,6 +35,9 @@
    cargo build --release --features napcat
    ```
 4. The binary file is located at `target/release/agent-cli`
+
+5. Rename config_temp.json to config.json, fill in your api_key registered on the deepseek official website, ensure you have both config.json and log4rs.yaml files locally
+   If you need to use napcat, run with the parameter `--napcat`, then rename napcat_temp.toml to napcat.toml, it will only process messages sent by the target_qq configured
 
 ## 💬 Usage Instructions
 
@@ -73,7 +76,3 @@ Set log level and output in `log4rs.yaml`
 ## 📜 License
 
 [GPL_V3](LICENSE)
-
-<a name="chinese-version"></a>
-## Chinese Version
-

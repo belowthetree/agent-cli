@@ -1,5 +1,6 @@
 # 🔧 Agent CLI - MCP Protocol Command Line AI Tool
 
+* a simple mcp client make by rust
 * A command-line AI tool based on the MCP (Model Context Protocol) protocol, providing streaming chat interaction and tool calling functionality.
 * Supports NapCat connection to QQ
 

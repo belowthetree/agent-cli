@@ -1,5 +1,6 @@
 # 🔧 Agent CLI - MCP协议命令行AI工具
 
+* 一个轻巧的基于 rust 的 mcp client
 * 一个基于MCP(Model Context Protocol)协议的命令行AI工具，提供流式聊天交互和工具调用功能。
 * 支持 NapCat 连接 QQ
 

@@ -1,12 +1,31 @@
-use std::{cmp::min, io, sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex}};
+use std::{
+    cmp::min,
+    io,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+};
 
 use clap::Parser;
-use futures::{pin_mut, StreamExt};
-use log::{debug};
-use ratatui::{ crossterm::event::{self, Event, KeyCode, KeyEventKind}, layout::Position, symbols::scrollbar, widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState}, DefaultTerminal, Frame};
+use futures::{StreamExt, pin_mut};
+use log::debug;
+use ratatui::{
+    DefaultTerminal, Frame,
+    crossterm::event::{self, Event, KeyCode, KeyEventKind},
+    layout::Position,
+    symbols::scrollbar,
+    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState},
+};
 
-use crate::{chat::{Chat, StreamedChatResponse}, mcp, model::param::ModelMessage, tui::{get_char_width, inputarea::InputArea, messageblock::MessageBlock}, Args};
-
+use crate::{
+    Args,
+    chat::{Chat, StreamedChatResponse},
+    mcp,
+    model::param::ModelMessage,
+    tui::{get_char_width, inputarea::InputArea, messageblock::MessageBlock},
+};
 
 pub struct App {
     chat: Arc<Mutex<Chat>>,
@@ -27,7 +46,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new()->Self {
+    pub fn new() -> Self {
         let mut chat = Chat::default();
         let args = Args::parse();
         if Some(true) == args.use_tool {
@@ -70,7 +89,10 @@ impl App {
         area.height -= self.input.height();
         self.window_height = area.height;
         // 绘制光标
-        frame.set_cursor_position(Position::new(input_area.x + self.cursor_offset + 1, input_area.y + 1));
+        frame.set_cursor_position(Position::new(
+            input_area.x + self.cursor_offset + 1,
+            input_area.y + 1,
+        ));
         // 处理信息块
         let st = self.index;
         let ed = area.height + st;
@@ -82,15 +104,25 @@ impl App {
             // 在显示范围内
             if block_end_line > st || block_start_line > ed {
                 let mut blk_area = area;
-                let blk_height = min(height, min(blk.line_count + block_start_line - st, blk.line_count));
+                let blk_height = min(
+                    height,
+                    min(blk.line_count + block_start_line - st, blk.line_count),
+                );
                 blk_area.height = blk_height;
-                debug!("显示 {:?} {:?} {} {}", area, blk_area, height, blk.line_count);
+                debug!(
+                    "显示 {:?} {:?} {} {}",
+                    area, blk_area, height, blk.line_count
+                );
                 // 如果前面的文字显示出框，挑后面的显示
                 if block_start_line < st {
                     // +3 往后一点，不然显示有问题
-                    blk.render_block(blk_area, frame.buffer_mut(), st - block_start_line, blk_area.width);
-                }
-                else {
+                    blk.render_block(
+                        blk_area,
+                        frame.buffer_mut(),
+                        st - block_start_line,
+                        blk_area.width,
+                    );
+                } else {
                     frame.render_widget(blk, blk_area);
                 }
                 height -= blk_area.height;
@@ -103,20 +135,23 @@ impl App {
         }
         // 渲染滚动条
         frame.render_stateful_widget(
-        Scrollbar::new(ScrollbarOrientation::VerticalLeft)
+            Scrollbar::new(ScrollbarOrientation::VerticalLeft)
                 .symbols(scrollbar::VERTICAL)
                 .begin_symbol(None)
                 .track_symbol(None)
                 .end_symbol(None),
-                scroll_area,
-                &mut self.vertical_scroll_state,
+            scroll_area,
+            &mut self.vertical_scroll_state,
         );
         // 最后渲染输入
         frame.render_widget(&self.input, input_area);
     }
 
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
-        let t = tokio::spawn(Self::watch_events(self.event_tx.clone(), self.should_exit.clone()));
+        let t = tokio::spawn(Self::watch_events(
+            self.event_tx.clone(),
+            self.should_exit.clone(),
+        ));
         while !self.should_exit.load(Ordering::Relaxed) {
             if self.dirty {
                 terminal.draw(|frame| {
@@ -137,7 +172,7 @@ impl App {
         Ok(())
     }
 
-    async fn watch_events(tx: mpsc::Sender<Event>, should_exit: Arc<AtomicBool>)-> io::Result<()> {
+    async fn watch_events(tx: mpsc::Sender<Event>, should_exit: Arc<AtomicBool>) -> io::Result<()> {
         while !should_exit.load(Ordering::Relaxed) {
             if let Event::Key(key) = event::read()? {
                 tx.send(Event::Key(key)).unwrap();
@@ -154,29 +189,27 @@ impl App {
                 if key.code == KeyCode::Esc {
                     if self.chat.lock().unwrap().is_running() {
                         self.chat.lock().unwrap().cancel();
-                    }
-                    else {
+                    } else {
                         self.should_exit.store(true, Ordering::Relaxed);
                     }
-                }
-                else if key.code == KeyCode::Down {
+                } else if key.code == KeyCode::Down {
                     if self.max_line > self.window_height {
                         self.index = min(self.max_line - self.window_height, self.index + 1);
-                    }
-                    else {
+                    } else {
                         self.index = 0;
                     }
-                }
-                else if key.code == KeyCode::Up && self.index > 0 {
+                } else if key.code == KeyCode::Up && self.index > 0 {
                     self.index = std::cmp::max(0, self.index - 1);
-                }
-                else if key.code == KeyCode::Left {
-                    self.cursor_offset = self.cursor_offset.saturating_sub(self.input.get_previous_char_width(self.cursor_offset));
-                }
-                else if key.code == KeyCode::Right {
-                    self.cursor_offset = std::cmp::min(self.input.get_content_width(), self.cursor_offset + self.input.get_width(self.cursor_offset));
-                }
-                else if key.code == KeyCode::Delete || key.code == KeyCode::Backspace {
+                } else if key.code == KeyCode::Left {
+                    self.cursor_offset = self
+                        .cursor_offset
+                        .saturating_sub(self.input.get_previous_char_width(self.cursor_offset));
+                } else if key.code == KeyCode::Right {
+                    self.cursor_offset = std::cmp::min(
+                        self.input.get_content_width(),
+                        self.cursor_offset + self.input.get_width(self.cursor_offset),
+                    );
+                } else if key.code == KeyCode::Delete || key.code == KeyCode::Backspace {
                     if self.cursor_offset > 0 {
                         let width = self.input.backspace(self.cursor_offset);
                         self.cursor_offset = self.cursor_offset.saturating_sub(width);
@@ -186,11 +219,14 @@ impl App {
                 else if key.code == KeyCode::Enter {
                     if !self.chat.lock().unwrap().is_running() {
                         self.cursor_offset = 0;
-                        tokio::spawn(Self::handle_chat(self.chat.clone(), self.input.clone(), self.scroll_down_tx.clone()));
+                        tokio::spawn(Self::handle_chat(
+                            self.chat.clone(),
+                            self.input.clone(),
+                            self.scroll_down_tx.clone(),
+                        ));
                         self.input.clear();
                     }
-                }
-                else {
+                } else {
                     match key.code {
                         KeyCode::Char(c) => {
                             if self.cursor_offset == self.input.get_content_width() {
@@ -227,9 +263,10 @@ impl App {
             self.blocks.push(block);
         }
         if self.max_line > self.window_height {
-            self.vertical_scroll_state = self.vertical_scroll_state.content_length((self.max_line - self.window_height) as usize);
-        }
-        else {
+            self.vertical_scroll_state = self
+                .vertical_scroll_state
+                .content_length((self.max_line - self.window_height) as usize);
+        } else {
             self.vertical_scroll_state = self.vertical_scroll_state.content_length(1);
         }
         self.vertical_scroll_state = self.vertical_scroll_state.position(self.index as usize);
@@ -240,30 +277,46 @@ impl App {
         let mut chat = selfchat.lock().unwrap().clone();
         {
             let stream = chat.stream_chat(&input.content);
-            selfchat.lock().unwrap().context.push(ModelMessage::user(input.content.clone()));
+            selfchat
+                .lock()
+                .unwrap()
+                .context
+                .push(ModelMessage::user(input.content.clone()));
             selfchat.lock().unwrap().lock();
             tx.send(true).unwrap();
             pin_mut!(stream);
-            selfchat.lock().unwrap().context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
+            selfchat
+                .lock()
+                .unwrap()
+                .context
+                .push(ModelMessage::assistant("".into(), "".into(), vec![]));
             loop {
                 tx.send(true).unwrap();
                 if let Some(result) = stream.next().await {
                     let idx = selfchat.lock().unwrap().context.len() - 1;
                     if let Ok(res) = result {
                         match res {
-                            StreamedChatResponse::Text(text) => selfchat.lock().unwrap().context[idx].add_content(text),
-                            StreamedChatResponse::ToolCall(tool_call) => selfchat.lock().unwrap().context[idx].add_tool(tool_call),
-                            StreamedChatResponse::Reasoning(think) => selfchat.lock().unwrap().context[idx].add_think(think),
+                            StreamedChatResponse::Text(text) => {
+                                selfchat.lock().unwrap().context[idx].add_content(text)
+                            }
+                            StreamedChatResponse::ToolCall(tool_call) => {
+                                selfchat.lock().unwrap().context[idx].add_tool(tool_call)
+                            }
+                            StreamedChatResponse::Reasoning(think) => {
+                                selfchat.lock().unwrap().context[idx].add_think(think)
+                            }
                             StreamedChatResponse::ToolResponse(tool) => {
                                 selfchat.lock().unwrap().context.push(tool);
-                                selfchat.lock().unwrap().context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
+                                selfchat
+                                    .lock()
+                                    .unwrap()
+                                    .context
+                                    .push(ModelMessage::assistant("".into(), "".into(), vec![]));
                             }
-                            StreamedChatResponse::End => {
-                            }
+                            StreamedChatResponse::End => {}
                         }
                     }
-                }
-                else {
+                } else {
                     break;
                 }
             }

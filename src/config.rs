@@ -1,5 +1,6 @@
+use anyhow;
 use rmcp::serde;
-use rmcp::{RoleClient, ServiceExt, service::RunningService, transport::ConfigureCommandExt};
+use rmcp::{RoleClient, ServiceExt, service::RunningService};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -53,11 +54,33 @@ impl McpServerTransportConfig {
                 args,
                 envs,
             } => {
-                let transport = rmcp::transport::TokioChildProcess::new(
-                    tokio::process::Command::new(command).configure(|cmd| {
-                        cmd.args(args).envs(envs);
-                    }),
-                )?;
+                // 使用管道而不是继承终端，避免破坏crossterm的raw模式输入
+                let mut cmd = tokio::process::Command::new(command);
+                cmd.args(args)
+                    .envs(envs)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
+                
+                let mut child = cmd.spawn()?;
+                
+                // 手动获取stdin/stdout管道
+                let stdout = child.stdout.take().ok_or_else(|| {
+                    anyhow::anyhow!("stdout was not captured")
+                })?;
+                
+                let stdin = child.stdin.take().ok_or_else(|| {
+                    anyhow::anyhow!("stdin was not captured")
+                })?;
+                
+                // 创建自定义的transport
+                let transport = rmcp::transport::async_rw::AsyncRwTransport::new(stdout, stdin);
+                
+                // 保存子进程引用以便后续管理
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
+                
                 ().serve(transport).await?
             }
         };

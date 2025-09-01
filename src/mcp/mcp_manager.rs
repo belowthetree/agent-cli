@@ -47,7 +47,7 @@ impl McpManager {
             services.insert(mcptool.name(), McpService::from_config(transport.clone()));
             self_tools.insert(mcptool.name(), mcptool);
         }
-        let _ = service.notify_initialized().await;
+        service.cancel().await?;
         Ok(())
     }
 
@@ -126,6 +126,7 @@ impl McpManager {
                     name: std::borrow::Cow::Owned(mcptool.origin_name()),
                     arguments: Some(arguments_map),
                 }).await?;
+                service.cancel().await?;
             },
             // 内部定义的工具
             McpService::Internal(internal_tool) => {

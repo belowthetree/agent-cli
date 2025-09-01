@@ -1,22 +1,16 @@
 use std::{
     cmp::min,
-    io,
+    io::{self},
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
+        atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex
     },
 };
 
 use clap::Parser;
 use futures::{StreamExt, pin_mut};
-use log::debug;
+use log::{debug};
 use ratatui::{
-    DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode, KeyEventKind},
-    layout::Position,
-    symbols::scrollbar,
-    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState},
+    crossterm::event::{self, Event, KeyCode, KeyEventKind}, layout::Position, symbols::scrollbar, widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState}, DefaultTerminal, Frame
 };
 
 use crate::{

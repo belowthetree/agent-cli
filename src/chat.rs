@@ -82,82 +82,27 @@ impl Chat {
         self
     }
 
-    pub fn chat(&mut self, prompt: &str) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        self.add_message(ModelMessage::user(prompt.to_string()));
-        let cancel_token = self.cancel_token.clone();
-        self.running = true;
-        stream! {
-            let mut count = self.max_tool_try;
-            loop {
-                let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
-                {
-                    let stream = self.client.chat2(self.context.clone());
-                    pin_mut!(stream);
-                    while let Some(res) = stream.next().await {
-                        // 检查是否已取消
-                        if cancel_token.is_cancelled() {
-                            break;
-                        }
-                        info!("{:?}", res);
-                        match res {
-                            Ok(res) => {
-                                if res.content.len() > 0 {
-                                    msg.add_content(res.content.clone());
-                                    yield Ok(StreamedChatResponse::Text(res.content));
-                                }
-                                if res.think.len() > 0 {
-                                    msg.add_think(res.think.clone());
-                                    yield Ok(StreamedChatResponse::Reasoning(res.think));
-                                }
-                                if let Some(tools) = res.tool_calls {
-                                    for tool in tools {
-                                        msg.add_tool(tool.clone());
-                                        yield Ok(StreamedChatResponse::ToolCall(tool));
-                                    }
-                                }
-                            },
-                            Err(e) => yield Ok(StreamedChatResponse::Text(e.to_string())),
-                        }
-                    }
-                    yield Ok(StreamedChatResponse::End);
-                }
-                self.add_message(msg.clone());
-                if msg.tool_calls.is_some() && count > 0 {
-                    count -= 1;
-                    let tool_calls = msg.tool_calls.unwrap();
-                    let mut tool_responses = Vec::new();
-                    {
-                        let stream = self.call_tool(tool_calls);
-                        pin_mut!(stream);
-                        while let Some(res) = stream.next().await {
-                            match res {
-                                Ok(res) => {
-                                    yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
-                                    tool_responses.push(res);
-                                }
-                                Err(e) => {
-                                    yield Err(e);
-                                }
-                            }
-                        }
-                    }
-                    for response in tool_responses {
-                        self.add_message(response);
-                    }
-                }
-                else {
-                    break;
+    pub fn is_waiting_tool(&self)->bool {
+        if self.context.len() > 0 {
+            if let Some(tools) = &self.context[self.context.len() - 1].tool_calls {
+                return tools.len() > 0;
+            }
+        }
+        false
+    }
+
+    pub fn reject_tool_call(&mut self) {
+        if let Some(last) = self.context.last().cloned() {
+            if let Some(tools) = last.tool_calls {
+                for tool in tools {
+                    self.add_message(ModelMessage::tool("失败：用户拒绝".into(), tool));
                 }
             }
-            self.running = false;
         }
     }
 
-    pub fn stream_chat(
-        &mut self,
-        prompt: &str,
-    ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        self.add_message(ModelMessage::user(prompt.to_string()));
+    // 用已有的上下文再次发送给模型，用于突然中断的情况
+    pub fn stream_rechat(&mut self) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
         let cancel_token = self.cancel_token.clone();
         self.running = true;
         stream! {
@@ -190,7 +135,7 @@ impl Chat {
                                 }
                             }
                         },
-                        Err(e) => yield Ok(StreamedChatResponse::Text(e.to_string())),
+                        Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
                     }
                 }
                 yield Ok(StreamedChatResponse::End);
@@ -232,6 +177,85 @@ impl Chat {
             }
             self.running = false;
         }
+    }
+
+    pub fn chat(&mut self, prompt: &str) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
+        self.add_message(ModelMessage::user(prompt.to_string()));
+        let cancel_token = self.cancel_token.clone();
+        self.running = true;
+        stream! {
+            let mut count = self.max_tool_try;
+            loop {
+                let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
+                {
+                    let stream = self.client.chat2(self.context.clone());
+                    pin_mut!(stream);
+                    while let Some(res) = stream.next().await {
+                        // 检查是否已取消
+                        if cancel_token.is_cancelled() {
+                            break;
+                        }
+                        info!("{:?}", res);
+                        match res {
+                            Ok(res) => {
+                                if res.content.len() > 0 {
+                                    msg.add_content(res.content.clone());
+                                    yield Ok(StreamedChatResponse::Text(res.content));
+                                }
+                                if res.think.len() > 0 {
+                                    msg.add_think(res.think.clone());
+                                    yield Ok(StreamedChatResponse::Reasoning(res.think));
+                                }
+                                if let Some(tools) = res.tool_calls {
+                                    for tool in tools {
+                                        msg.add_tool(tool.clone());
+                                        yield Ok(StreamedChatResponse::ToolCall(tool));
+                                    }
+                                }
+                            },
+                            Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
+                        }
+                    }
+                    yield Ok(StreamedChatResponse::End);
+                }
+                self.add_message(msg.clone());
+                if msg.tool_calls.is_some() && count > 0 {
+                    count -= 1;
+                    let tool_calls = msg.tool_calls.unwrap();
+                    let mut tool_responses = Vec::new();
+                    {
+                        let stream = self.call_tool(tool_calls);
+                        pin_mut!(stream);
+                        while let Some(res) = stream.next().await {
+                            match res {
+                                Ok(res) => {
+                                    yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
+                                    tool_responses.push(res);
+                                }
+                                Err(e) => {
+                                    yield Err(e);
+                                }
+                            }
+                        }
+                    }
+                    for response in tool_responses {
+                        self.add_message(response);
+                    }
+                }
+                else {
+                    break;
+                }
+            }
+            self.running = false;
+        }
+    }
+
+    pub fn stream_chat(
+        &mut self,
+        prompt: &str,
+    ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
+        self.add_message(ModelMessage::user(prompt.to_string()));
+        self.stream_rechat()
     }
 
     fn call_tool(&self, tool_calls: Vec<ToolCall>)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {

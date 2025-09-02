@@ -1,8 +1,6 @@
 use std::char;
-
 use log::{debug};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
-
 use crate::tui::get_char_width;
 
 #[derive(Clone)]
@@ -21,8 +19,8 @@ impl Default for InputArea {
 }
 
 impl InputArea {
-    pub fn add(&mut self, c: char) {
-        self.content.push(c);
+    pub fn add(&mut self, c: char, idx: usize) {
+        self.content.insert(idx, c);
     }
 
     // 退格，返回退格的字符宽度
@@ -88,6 +86,21 @@ impl InputArea {
             }
         }
         0
+    }
+
+    pub fn get_index_by_width(&self, width: u16)->usize {
+        let chars: Vec<char> = self.content.chars().collect();
+        let mut width_count = 0;
+        let mut s = String::new();
+        for idx in 0..chars.len() {
+            let w = get_char_width(chars[idx]);
+            if width_count >= width {
+                return s.len();
+            }
+            s.push(chars[idx]);
+            width_count += w;
+        }
+        s.len()
     }
 }
 

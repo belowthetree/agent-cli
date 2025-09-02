@@ -212,21 +212,38 @@ impl App {
                 // 发给模型
                 else if key.code == KeyCode::Enter {
                     if !self.chat.lock().unwrap().is_running() {
+                        // 先检查模型是否在等待调用工具，可能存在工具调用次数用尽退出对话的情况
+                        if self.chat.lock().unwrap().is_waiting_tool() {
+                            // yes / y 为继续，n / no 为清除
+                            let res = self.input.content.to_lowercase();
+                            self.input.clear();
+                            if res == "y" || res == "yes" {
+                                tokio::spawn(Self::handle_chat(
+                                    self.chat.clone(),
+                                    self.input.clone(),
+                                    self.scroll_down_tx.clone(),
+                                ));
+                            }
+                            else if res == "no" || res == "n" {
+                                self.chat.lock().unwrap().reject_tool_call();
+                            }
+                        }
+                        else {
+                            tokio::spawn(Self::handle_chat(
+                                self.chat.clone(),
+                                self.input.clone(),
+                                self.scroll_down_tx.clone(),
+                            ));
+                        }
                         self.cursor_offset = 0;
-                        tokio::spawn(Self::handle_chat(
-                            self.chat.clone(),
-                            self.input.clone(),
-                            self.scroll_down_tx.clone(),
-                        ));
                         self.input.clear();
                     }
                 } else {
                     match key.code {
                         KeyCode::Char(c) => {
-                            if self.cursor_offset == self.input.get_content_width() {
-                                self.cursor_offset += get_char_width(c);
-                            }
-                            self.input.add(c);
+                            let idx = self.input.get_index_by_width(self.cursor_offset);
+                            self.cursor_offset += get_char_width(c);
+                            self.input.add(c, idx as usize);
                         }
                         _ => {}
                     }
@@ -270,12 +287,15 @@ impl App {
     async fn handle_chat(selfchat: Arc<Mutex<Chat>>, input: InputArea, tx: mpsc::Sender<bool>) {
         let mut chat = selfchat.lock().unwrap().clone();
         {
-            let stream = chat.stream_chat(&input.content);
-            selfchat
-                .lock()
-                .unwrap()
-                .context
-                .push(ModelMessage::user(input.content.clone()));
+            if input.content.len() > 0 {
+                chat.context.push(ModelMessage::user(input.content.clone()));
+                selfchat
+                    .lock()
+                    .unwrap()
+                    .context
+                    .push(ModelMessage::user(input.content.clone()));
+            }
+            let stream = chat.stream_rechat();
             selfchat.lock().unwrap().lock();
             tx.send(true).unwrap();
             pin_mut!(stream);
@@ -309,6 +329,9 @@ impl App {
                             }
                             StreamedChatResponse::End => {}
                         }
+                    }
+                    else if let Err(err) = result {
+                        selfchat.lock().unwrap().context.push(ModelMessage::assistant(err.to_string(), "".into(), vec![]));
                     }
                 } else {
                     break;

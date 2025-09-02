@@ -1,4 +1,4 @@
-use log::{debug};
+use log::{debug, info};
 use ratatui::{buffer::Buffer, layout::Rect, style::{Style, Stylize}, text::{Line}, widgets::{Block, Borders, ListItem, Padding, Paragraph, Widget, Wrap}};
 
 use crate::{model::param::ModelMessage, tui::get_char_width};
@@ -23,7 +23,8 @@ impl MessageBlock {
         // 至少 4 行
         let mut height = 3;
         let mut width_count = 0;
-        for char in self.message.content.chars() {
+        let ct = self.get_content();
+        for char in ct.chars() {
             let width = get_char_width(char);
             // debug!("{} {}", char, width);
             if width_count + width > viewwidth {
@@ -45,7 +46,8 @@ impl MessageBlock {
 
     pub fn get_display_content(&self, start_line: u16, viewwidth: u16)->String {
         let mut content = String::new();
-        let chars = self.message.content.chars();
+        let ct = self.get_content();
+        let chars = ct.chars();
         // 至少 4 行
         let mut height = 3;
         let mut width_count = 0;
@@ -91,6 +93,19 @@ impl MessageBlock {
         }
         para.render(area, buf);
     }
+
+    pub fn get_content(&self)->String {
+        let mut content = self.message.content.clone();
+        if let Some(tools) = &self.message.tool_calls {
+            let mut ct = String::new();
+            for tool in tools {
+                ct += &tool.function.name;
+            }
+            content += "\n工具调用：";
+            content += &ct;
+        }
+        content
+    }
 }
 
 impl Widget for &MessageBlock {
@@ -101,7 +116,8 @@ impl Widget for &MessageBlock {
             .padding(Padding::ZERO)
             .style(Style::new().light_blue())
             .borders(Borders::ALL);
-        let mut para = Paragraph::new(self.message.content.clone())
+        let content = self.get_content();
+        let mut para = Paragraph::new(content)
             .wrap(Wrap { trim: true})
             .block(block);
         if self.message.role == "user" {

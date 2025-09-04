@@ -259,7 +259,6 @@ impl App {
         self.blocks.clear();
         self.max_line = 0;
         let ctx = self.chat.lock().unwrap();
-        debug!("{:?}", ctx.context);
         for msg in ctx.context.iter() {
             // 系统、工具的信息过滤
             if msg.role == "system" || msg.role == "tool" {
@@ -270,6 +269,12 @@ impl App {
                 continue;
             }
             let block = MessageBlock::new(msg.clone(), self.width);
+            self.max_line += block.line_count;
+            self.blocks.push(block);
+        }
+        // 如果工具调用达到上限而中断
+        if ctx.is_waiting_tool() && !ctx.is_running() {
+            let block = MessageBlock::new(ModelMessage::system("工具调用次数达到设置上限，是否继续，输入 yes/y 继续，no/n 中断".into()), self.width);
             self.max_line += block.line_count;
             self.blocks.push(block);
         }

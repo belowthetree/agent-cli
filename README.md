@@ -4,7 +4,7 @@
 * 一个基于MCP(Model Context Protocol)协议的命令行AI工具，提供流式聊天交互和工具调用功能。
 * 支持 NapCat 连接 QQ
 
-[English Version](README_EN.md).
+[English Version](docs/README_EN.md).
 
 ## 示例
 ![](docs/agentcli.gif)
@@ -55,6 +55,7 @@ agent-cli -p "您的问题或指令"
 * --promp 用户输入，不填则进入命令行交互 UI 模式
 * --stream 是否流式，默认为 true
 * --use_tool 是否使用工具，默认为 true
+* --wait 等待模式，默认为 false。当为 true 时，程序会在循环中处理标准输入，每次对话不保存上下文
 
 ## 👨‍💻 开发指南
 
@@ -76,4 +77,3 @@ cargo test
 ## 📜 许可证
 
 [GPL_V3](LICENSE)
-

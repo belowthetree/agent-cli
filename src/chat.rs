@@ -103,79 +103,46 @@ impl Chat {
 
     // 用已有的上下文再次发送给模型，用于突然中断的情况
     pub fn stream_rechat(&mut self) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        let cancel_token = self.cancel_token.clone();
-        self.running = true;
+        let mut tools= Vec::new();
+        if let Some(last) = self.context.last() {
+            if let Some(calls) = &last.tool_calls {
+                for tool in calls {
+                    tools.push(tool.clone());
+                }
+            }
+        }
         stream! {
-            let mut count = self.max_tool_try;
-            loop {
-                let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
-                let stream = self.client.stream_chat(self.context.clone());
+            info!("stream_rechat 工具数 {:?}", tools);
+            let mut tool_responses = Vec::new();
+            {
+                let stream = self.call_tool(tools);
                 pin_mut!(stream);
-                // 接收模型输出
                 while let Some(res) = stream.next().await {
-                    // 检查是否已取消
-                    if cancel_token.is_cancelled() {
-                        break;
-                    }
-                    info!("{:?}", res);
                     match res {
                         Ok(res) => {
-                            if res.content.len() > 0 {
-                                msg.add_content(res.content.clone());
-                                yield Ok(StreamedChatResponse::Text(res.content));
-                            }
-                            if res.think.len() > 0 {
-                                msg.add_think(res.think.clone());
-                                yield Ok(StreamedChatResponse::Reasoning(res.think));
-                            }
-                            if let Some(tools) = res.tool_calls {
-                                for tool in tools {
-                                    msg.add_tool(tool.clone());
-                                    yield Ok(StreamedChatResponse::ToolCall(tool));
-                                }
-                            }
-                        },
-                        Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
+                            yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
+                            tool_responses.push(res);
+                        }
+                        Err(e) => {
+                            yield Err(e);
+                        }
+                    }
+                    if self.cancel_token.is_cancelled() {
+                        break;
                     }
                 }
-                yield Ok(StreamedChatResponse::End);
-                self.context.push(msg.clone());
+            }
+            for response in tool_responses {
+                self.context.push(response);
                 if self.context.len() > self.max_context_num {
                     self.context.remove(0);
                 }
-                // 处理工具调用
-                info!("工具数 {:?}", msg.tool_calls);
-                if msg.tool_calls.is_some() && count > 0 {
-                    count -= 1;
-                    let tool_calls = msg.tool_calls.unwrap();
-                    let mut tool_responses = Vec::new();
-                    {
-                        let stream = self.call_tool(tool_calls);
-                        pin_mut!(stream);
-                        while let Some(res) = stream.next().await {
-                            match res {
-                                Ok(res) => {
-                                    yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
-                                    tool_responses.push(res);
-                                }
-                                Err(e) => {
-                                    yield Err(e);
-                                }
-                            }
-                        }
-                    }
-                    for response in tool_responses {
-                        self.context.push(response);
-                        if self.context.len() > self.max_context_num {
-                            self.context.remove(0);
-                        }
-                    }
-                }
-                else {
-                    break;
-                }
             }
-            self.running = false;
+            let stream = self.handle_stream_chat();
+            pin_mut!(stream);
+            while let Some(res) = stream.next().await {
+                yield res;
+            }
         }
     }
 
@@ -255,7 +222,84 @@ impl Chat {
         prompt: &str,
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
         self.add_message(ModelMessage::user(prompt.to_string()));
-        self.stream_rechat()
+        self.handle_stream_chat()
+    }
+
+    pub fn handle_stream_chat(&mut self)-> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
+        let cancel_token = self.cancel_token.clone();
+        self.running = true;
+        stream! {
+            let mut count = self.max_tool_try;
+            loop {
+                let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
+                let stream = self.client.stream_chat(self.context.clone());
+                pin_mut!(stream);
+                // 接收模型输出
+                while let Some(res) = stream.next().await {
+                    // 检查是否已取消
+                    if cancel_token.is_cancelled() {
+                        break;
+                    }
+                    info!("{:?}", res);
+                    match res {
+                        Ok(res) => {
+                            if res.content.len() > 0 {
+                                msg.add_content(res.content.clone());
+                                yield Ok(StreamedChatResponse::Text(res.content));
+                            }
+                            if res.think.len() > 0 {
+                                msg.add_think(res.think.clone());
+                                yield Ok(StreamedChatResponse::Reasoning(res.think));
+                            }
+                            if let Some(tools) = res.tool_calls {
+                                for tool in tools {
+                                    msg.add_tool(tool.clone());
+                                    yield Ok(StreamedChatResponse::ToolCall(tool));
+                                }
+                            }
+                        },
+                        Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
+                    }
+                }
+                yield Ok(StreamedChatResponse::End);
+                self.context.push(msg.clone());
+                if self.context.len() > self.max_context_num {
+                    self.context.remove(0);
+                }
+                // 处理工具调用
+                info!("工具数 {:?}", msg.tool_calls);
+                if msg.tool_calls.is_some() && count > 0 {
+                    count -= 1;
+                    let tool_calls = msg.tool_calls.unwrap();
+                    let mut tool_responses = Vec::new();
+                    {
+                        let stream = self.call_tool(tool_calls);
+                        pin_mut!(stream);
+                        while let Some(res) = stream.next().await {
+                            match res {
+                                Ok(res) => {
+                                    yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
+                                    tool_responses.push(res);
+                                }
+                                Err(e) => {
+                                    yield Err(e);
+                                }
+                            }
+                        }
+                    }
+                    for response in tool_responses {
+                        self.context.push(response);
+                        if self.context.len() > self.max_context_num {
+                            self.context.remove(0);
+                        }
+                    }
+                }
+                else {
+                    break;
+                }
+            }
+            self.running = false;
+        }
     }
 
     fn call_tool(&self, tool_calls: Vec<ToolCall>)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {

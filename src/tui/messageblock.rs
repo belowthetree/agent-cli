@@ -1,4 +1,4 @@
-use log::{debug, info};
+use log::{debug};
 use ratatui::{buffer::Buffer, layout::Rect, style::{Style, Stylize}, text::{Line}, widgets::{Block, Borders, ListItem, Padding, Paragraph, Widget, Wrap}};
 
 use crate::{model::param::ModelMessage, tui::get_char_width};

@@ -23,6 +23,9 @@ struct Args {
     /// 是否使用工具（默认使用）
     #[arg(short, long, default_value = "true")]
     use_tool: Option<bool>,
+    /// 是否等待用户输入（默认不等待）
+    #[arg(short, long, default_value = "false")]
+    wait: Option<bool>,
     #[cfg(feature = "napcat")]
     #[arg(short, long, default_value_t = false)]
     napcat: bool,
@@ -49,7 +52,11 @@ async fn main() -> anyhow::Result<()> {
         .await;
         return Ok(());
     }
-    if args.prompt.is_none() {
+
+    // 处理 wait 模式
+    if Some(true) == args.wait {
+        wait_mode(args).await;
+    } else if args.prompt.is_none() {
         let _ = tui::run().await;
     } else {
         chat().await;
@@ -67,6 +74,52 @@ async fn chat() {
         handle_output(chat.stream_chat(&args.prompt.unwrap_or_default())).await;
     } else {
         handle_output(chat.chat(&args.prompt.unwrap_or_default())).await;
+    }
+}
+
+async fn wait_mode(args: Args) {
+    use std::io::{self, BufRead, Write};
+
+    println!("进入等待模式，输入 'exit' 或 'quit' 退出");
+    println!("请输入您的消息:");
+
+    let stdin = io::stdin();
+    let mut stdin_lock = stdin.lock();
+    let mut buffer = String::new();
+
+    loop {
+        buffer.clear();
+        print!("> ");
+        io::stdout().flush().unwrap();
+
+        if stdin_lock.read_line(&mut buffer).is_err() {
+            println!("读取输入失败");
+            break;
+        }
+
+        let input = buffer.trim();
+        if input.is_empty() {
+            continue;
+        }
+
+        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+            println!("退出等待模式");
+            break;
+        }
+
+        // 创建新的 Chat 实例，不保存上下文
+        let mut chat = chat::Chat::new(config::Config::local().unwrap());
+        if Some(true) == args.use_tool {
+            chat = chat.tools(mcp::get_config_tools());
+        }
+
+        if Some(true) == args.stream {
+            handle_output(chat.stream_chat(input)).await;
+        } else {
+            handle_output(chat.chat(input)).await;
+        }
+
+        println!(); // 添加空行分隔每次对话
     }
 }
 

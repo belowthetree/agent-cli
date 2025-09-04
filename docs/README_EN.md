@@ -4,7 +4,7 @@
 * A command-line AI tool based on the MCP (Model Context Protocol) protocol, providing streaming chat interaction and tool calling functionality.
 * Supports NapCat connection to QQ
 
-[中文版本](README.md).
+[中文版本](../README.md).
 
 ## Examples
 ![](docs/agentcli.gif)
@@ -55,6 +55,7 @@ Configuration file is located at `config.json`, specific configuration reference
 * --prompt User input, if not provided, enters command-line interactive UI mode
 * --stream Whether to use streaming, defaults to true
 * --use_tool Whether to use tools, defaults to true
+* --wait Wait mode, defaults to false. When true, the program processes standard input in a loop, with no context preservation between conversations
 
 ## 👨‍💻 Development Guide
 

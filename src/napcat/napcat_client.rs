@@ -54,26 +54,38 @@ impl NapCatClient {
                     onebot_v11::event::message::Message::PrivateMessage(private_msg) => {
                         if self.config.is_target_user(private_msg.user_id) {
                             let stream = self.chat.chat(&get_text_msg(private_msg.message));
-                            let response = get_output_tostring(stream).await;
-                            let payload =
-                                ApiPayload::SendPrivateForwardMsg(SendPrivateForwardMsg {
-                                    user_id: private_msg.user_id,
-                                    messages: vec![MessageSegment::text(response)],
-                                });
-                            let res = conn.clone().call_api(payload).await;
-                            info!("{:?}", res);
+                            match get_output_tostring(stream).await {
+                                Ok(response) => {
+                                    let payload =
+                                        ApiPayload::SendPrivateForwardMsg(SendPrivateForwardMsg {
+                                            user_id: private_msg.user_id,
+                                            messages: vec![MessageSegment::text(response)],
+                                        });
+                                    let res = conn.clone().call_api(payload).await;
+                                    info!("{:?}", res);
+                                }
+                                Err(e) => {
+                                    log::error!("获取聊天响应失败: {}", e);
+                                }
+                            }
                         }
                     }
                     onebot_v11::event::message::Message::GroupMessage(group_message) => {
                         if self.config.is_group_at_self(group_message.clone()) {
                             let stream = self.chat.chat(&get_text_msg(group_message.message));
-                            let response = get_output_tostring(stream).await;
-                            let payload = ApiPayload::SendGroupForwardMsg(SendGroupForwardMsg {
-                                group_id: group_message.group_id,
-                                messages: vec![MessageSegment::text(response)],
-                            });
-                            let res = conn.clone().call_api(payload).await;
-                            info!("{:?}", res);
+                            match get_output_tostring(stream).await {
+                                Ok(response) => {
+                                    let payload = ApiPayload::SendGroupForwardMsg(SendGroupForwardMsg {
+                                        group_id: group_message.group_id,
+                                        messages: vec![MessageSegment::text(response)],
+                                    });
+                                    let res = conn.clone().call_api(payload).await;
+                                    info!("{:?}", res);
+                                }
+                                Err(e) => {
+                                    log::error!("获取聊天响应失败: {}", e);
+                                }
+                            }
                         }
                     }
                 },

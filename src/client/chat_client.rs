@@ -14,12 +14,11 @@ pub struct ChatClient {
 impl ChatClient {
     pub fn new(key: String, url: String, model: String, tools: Vec<McpTool>) -> Self {
         let agent = deepseek::DeepseekModel::new(url, model, key);
-        // let agent = deepseek::DeepseekModel::new("http://localhost:11434/v1".into(), "qwen3:4b".into(), key);
         let mut client = Self {
             agent,
             tools: vec![],
         };
-        info!("{:?}", tools);
+        info!("初始化工具: {:?}", tools);
         client.tools(tools);
         client
     }
@@ -31,20 +30,42 @@ impl ChatClient {
         }
     }
 
-    pub fn chat2(&self, messages: Vec<ModelMessage>)->impl Stream<Item = Result<ModelMessage, anyhow::Error>> + '_ {
-        info!("chat2 开始 {:?}", messages);
-        let tools = if self.tools.len() > 0 {Some(self.tools.clone())} else {None};
-        let param = ModelInputParam{
+    /// 获取工具列表的引用，避免不必要的克隆
+    fn get_tools_ref(&self) -> Option<&Vec<Tool>> {
+        if self.tools.is_empty() {
+            None
+        } else {
+            Some(&self.tools)
+        }
+    }
+
+    /// 构建模型输入参数
+    fn build_model_input(&self, messages: Vec<ModelMessage>) -> ModelInputParam {
+        ModelInputParam {
             temperature: None,
-            tools,
+            tools: self.get_tools_ref().cloned(),
             messages,
-        };
+        }
+    }
+
+    pub fn chat2(&self, messages: Vec<ModelMessage>)->impl Stream<Item = Result<ModelMessage, anyhow::Error>> + '_ {
+        info!("chat2 开始，消息数量: {}", messages.len());
+        let param = self.build_model_input(messages);
+        
         stream! {
-            let answer = self.agent.chat(param).await.map_err(|e| anyhow::anyhow!(e))?;
-            info!("chat2 答复：{:?}", answer);
+            let answer = match self.agent.chat(param).await {
+                Ok(answer) => answer,
+                Err(e) => {
+                    yield Err(anyhow::anyhow!("聊天请求失败: {}", e));
+                    return;
+                }
+            };
+            
+            info!("chat2 收到答复，内容块数量: {}", answer.len());
             let mut tool_calls = Vec::new();
             let mut content = String::new();
             let mut think = String::new();
+            
             // 非流式请求，工具调用、回复、思维链在同一次回复里
             for ctx in answer.iter() {
                 match ctx {
@@ -60,22 +81,20 @@ impl ChatClient {
                     _ => {}
                 }
             }
-            yield Ok(ModelMessage::assistant(content, think, tool_calls.clone()));
+            
+            yield Ok(ModelMessage::assistant(content, think, tool_calls));
         }
     }
 
     // 返回增量
     pub fn stream_chat(&self, messages: Vec<ModelMessage>)-> impl Stream<Item = Result<ModelMessage, anyhow::Error>> + '_ {
         let agent = self.agent.clone();
+        let param = self.build_model_input(messages);
+        
         stream! {
-            let tools = if self.tools.len() > 0 {Some(self.tools.clone())} else {None};
-            let param = ModelInputParam{
-                temperature: None,
-                tools,
-                messages,
-            };
-            info!("stream chat {:?}", param);
+            info!("stream chat 开始，参数: {:?}", param);
             let mut stream_res = Box::pin(agent.stream_chat(param).await);
+            
             while let Some(res) = stream_res.next().await {
                 match res {
                     Ok(CommonConnectionContent::Content(text)) => {
@@ -88,11 +107,11 @@ impl ChatClient {
                         yield Ok(ModelMessage::assistant("".into(), reasoning, vec![]));
                     }
                     Ok(CommonConnectionContent::FinishReason(reason)) => {
-                        info!("finish {}", reason);
+                        info!("流式聊天完成，原因: {}", reason);
                         break;
                     }
                     Err(e) => {
-                        yield Err(anyhow::anyhow!(e));
+                        yield Err(anyhow::anyhow!("流式响应错误: {}", e));
                         break;
                     }
                 }

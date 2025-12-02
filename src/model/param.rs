@@ -27,7 +27,7 @@ impl ModelMessage {
     }
 
     pub fn assistant(content: String, think: String, tool_calls: Vec<ToolCall>)->Self {
-        let tool_calls = if tool_calls.len() > 0 { Some(tool_calls) } else { None };
+        let tool_calls = if !tool_calls.is_empty() { Some(tool_calls) } else { None };
         Self {
             role: "assistant".into(),
             content,

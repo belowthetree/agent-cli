@@ -104,7 +104,7 @@ impl AgentModel for DeepseekModel {
             "model": self.model_name,
             "messages": messages,
             "stream": false,
-            "tools": if tools.len() > 0 { Some(tools) } else { None },
+            "tools": if !tools.is_empty() { Some(tools) } else { None },
             "temperature": param.temperature.unwrap_or(self.temperature.parse().unwrap())
         }))
         .unwrap();
@@ -139,7 +139,7 @@ impl AgentModel for DeepseekModel {
             "model": self.model_name,
             "messages": messages,
             "stream": true,
-            "tools": if tools.len() > 0 {Some(tools)} else {None},
+            "tools": if !tools.is_empty() {Some(tools)} else {None},
             "temperature": param.temperature.unwrap_or(self.temperature.parse().unwrap())
         }))
         .unwrap();

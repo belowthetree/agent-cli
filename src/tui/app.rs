@@ -304,35 +304,56 @@ impl App {
             selfchat.lock().unwrap().lock();
             tx.send(true).unwrap();
             pin_mut!(stream);
-            selfchat
-                .lock()
-                .unwrap()
-                .context
-                .push(ModelMessage::assistant("".into(), "".into(), vec![]));
+            // 不再手动创建assistant消息，让chat.rs处理
             loop {
                 tx.send(true).unwrap();
                 if let Some(result) = stream.next().await {
-                    let idx = selfchat.lock().unwrap().context.len() - 1;
                     if let Ok(res) = result {
                         match res {
                             StreamedChatResponse::Text(text) => {
-                                selfchat.lock().unwrap().context[idx].add_content(text)
+                                // 检查是否已经有assistant消息，如果没有则创建
+                                let mut ctx = selfchat.lock().unwrap();
+                                let last_is_assistant = ctx.context.last()
+                                    .map(|m| m.role == "assistant")
+                                    .unwrap_or(false);
+                                
+                                if !last_is_assistant {
+                                    ctx.context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
+                                }
+                                let idx = ctx.context.len() - 1;
+                                ctx.context[idx].add_content(text);
                             }
                             StreamedChatResponse::ToolCall(tool_call) => {
-                                selfchat.lock().unwrap().context[idx].add_tool(tool_call)
+                                let mut ctx = selfchat.lock().unwrap();
+                                let last_is_assistant = ctx.context.last()
+                                    .map(|m| m.role == "assistant")
+                                    .unwrap_or(false);
+                                
+                                if !last_is_assistant {
+                                    ctx.context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
+                                }
+                                let idx = ctx.context.len() - 1;
+                                ctx.context[idx].add_tool(tool_call);
                             }
                             StreamedChatResponse::Reasoning(think) => {
-                                selfchat.lock().unwrap().context[idx].add_think(think)
+                                let mut ctx = selfchat.lock().unwrap();
+                                let last_is_assistant = ctx.context.last()
+                                    .map(|m| m.role == "assistant")
+                                    .unwrap_or(false);
+                                
+                                if !last_is_assistant {
+                                    ctx.context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
+                                }
+                                let idx = ctx.context.len() - 1;
+                                ctx.context[idx].add_think(think);
                             }
                             StreamedChatResponse::ToolResponse(tool) => {
                                 selfchat.lock().unwrap().context.push(tool);
-                                selfchat
-                                    .lock()
-                                    .unwrap()
-                                    .context
-                                    .push(ModelMessage::assistant("".into(), "".into(), vec![]));
                             }
-                            StreamedChatResponse::End => {}
+                            StreamedChatResponse::End => {
+                                // End事件表示模型响应完成，此时chat.context中应该已经包含了完整的消息
+                                // 包括token_usage信息
+                            }
                         }
                     }
                     else if let Err(err) = result {
@@ -343,6 +364,7 @@ impl App {
                 }
             }
         }
+        // 使用chat的完整上下文，它包含了token_usage信息
         selfchat.lock().unwrap().context = chat.context;
         selfchat.lock().unwrap().unlock();
     }

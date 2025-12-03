@@ -11,8 +11,6 @@ impl ToolClient {
         stream! {
             // 输入验证：检查工具调用列表是否为空
             if calls.is_empty() {
-                warn!("需要至少调用一个工具");
-                yield Err(anyhow::anyhow!("需要至少调用一个工具"));
                 return;
             }
 

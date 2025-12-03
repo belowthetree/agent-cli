@@ -94,6 +94,9 @@ fn max_tool_try_default() -> usize {
 fn max_context_num_default() -> usize {
     10
 }
+fn max_tokens_default() -> Option<u32> {
+    None
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EnvConfig {
@@ -112,6 +115,8 @@ pub struct Config {
     pub max_tool_try: usize,
     #[serde(default = "max_context_num_default")]
     pub max_context_num: usize,
+    #[serde(default = "max_tokens_default")]
+    pub max_tokens: Option<u32>,
     pub prompt: Option<String>,
     #[serde(default)]
     pub envs: Vec<EnvConfig>,

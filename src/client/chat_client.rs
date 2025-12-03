@@ -3,7 +3,7 @@ use futures::{Stream, StreamExt};
 use log::{info};
 use rmcp::model::Tool;
 
-use crate::{connection::CommonConnectionContent, mcp::{McpTool}, model::{deepseek, param::{ModelInputParam, ModelMessage}, AgentModel}};
+use crate::{connection::{CommonConnectionContent, TokenUsage}, mcp::{McpTool}, model::{deepseek, param::{ModelInputParam, ModelMessage}, AgentModel}};
 
 #[derive(Clone)]
 pub struct ChatClient {
@@ -65,6 +65,7 @@ impl ChatClient {
             let mut tool_calls = Vec::new();
             let mut content = String::new();
             let mut think = String::new();
+            let mut token_usage: Option<TokenUsage> = None;
             
             // 非流式请求，工具调用、回复、思维链在同一次回复里
             for ctx in answer.iter() {
@@ -78,15 +79,18 @@ impl ChatClient {
                     CommonConnectionContent::Reasoning(reason) => {
                         think = reason.clone();
                     }
-                    CommonConnectionContent::TokenUsage(token_usage) => {
+                    CommonConnectionContent::TokenUsage(usage) => {
                         info!("Token 使用情况: prompt_tokens={}, completion_tokens={}, total_tokens={}", 
-                            token_usage.prompt_tokens, token_usage.completion_tokens, token_usage.total_tokens);
+                            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
+                        token_usage = Some(usage.clone());
                     }
                     _ => {}
                 }
             }
             
-            yield Ok(ModelMessage::assistant(content, think, tool_calls));
+            let mut msg = ModelMessage::assistant(content, think, tool_calls);
+            msg.token_usage = token_usage;
+            yield Ok(msg);
         }
     }
 
@@ -98,6 +102,7 @@ impl ChatClient {
         stream! {
             info!("stream chat 开始，参数: {:?}", param);
             let mut stream_res = Box::pin(agent.stream_chat(param).await);
+            let mut token_usage: Option<TokenUsage> = None;
             
             while let Some(res) = stream_res.next().await {
                 match res {
@@ -112,11 +117,19 @@ impl ChatClient {
                     }
                     Ok(CommonConnectionContent::FinishReason(reason)) => {
                         info!("流式聊天完成，原因: {}", reason);
+                        // 在流式结束时，如果有token使用信息，发送一条包含token使用信息的消息
+                        if let Some(usage) = token_usage {
+                            let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
+                            msg.token_usage = Some(usage);
+                            yield Ok(msg);
+                        }
                         break;
                     }
-                    Ok(CommonConnectionContent::TokenUsage(token_usage)) => {
+                    Ok(CommonConnectionContent::TokenUsage(usage)) => {
                         info!("Token 使用情况: prompt_tokens={}, completion_tokens={}, total_tokens={}", 
-                            token_usage.prompt_tokens, token_usage.completion_tokens, token_usage.total_tokens);
+                            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
+                        token_usage = Some(usage.clone());
+                        yield Ok(ModelMessage::token(usage));
                     }
                     Err(e) => {
                         yield Err(anyhow::anyhow!("流式响应错误: {}", e));

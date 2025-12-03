@@ -71,9 +71,9 @@ async fn chat() {
         chat = chat.tools(mcp::get_config_tools());
     }
     if Some(true) == args.stream {
-        handle_output(chat.stream_chat(&args.prompt.unwrap_or_default())).await;
+        handle_output(chat.stream_chat(&args.prompt.unwrap_or_default())).await.unwrap();
     } else {
-        handle_output(chat.chat(&args.prompt.unwrap_or_default())).await;
+        handle_output(chat.chat(&args.prompt.unwrap_or_default())).await.unwrap();
     }
 }
 
@@ -114,9 +114,9 @@ async fn wait_mode(args: Args) {
         }
 
         if Some(true) == args.stream {
-            handle_output(chat.stream_chat(input)).await;
+            handle_output(chat.stream_chat(input)).await.unwrap();
         } else {
-            handle_output(chat.chat(input)).await;
+            handle_output(chat.chat(input)).await.unwrap();
         }
 
         println!(); // 添加空行分隔每次对话

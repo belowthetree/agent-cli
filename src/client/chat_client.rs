@@ -78,6 +78,10 @@ impl ChatClient {
                     CommonConnectionContent::Reasoning(reason) => {
                         think = reason.clone();
                     }
+                    CommonConnectionContent::TokenUsage(token_usage) => {
+                        info!("Token 使用情况: prompt_tokens={}, completion_tokens={}, total_tokens={}", 
+                            token_usage.prompt_tokens, token_usage.completion_tokens, token_usage.total_tokens);
+                    }
                     _ => {}
                 }
             }
@@ -109,6 +113,10 @@ impl ChatClient {
                     Ok(CommonConnectionContent::FinishReason(reason)) => {
                         info!("流式聊天完成，原因: {}", reason);
                         break;
+                    }
+                    Ok(CommonConnectionContent::TokenUsage(token_usage)) => {
+                        info!("Token 使用情况: prompt_tokens={}, completion_tokens={}, total_tokens={}", 
+                            token_usage.prompt_tokens, token_usage.completion_tokens, token_usage.total_tokens);
                     }
                     Err(e) => {
                         yield Err(anyhow::anyhow!("流式响应错误: {}", e));

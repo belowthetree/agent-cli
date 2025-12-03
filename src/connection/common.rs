@@ -5,7 +5,7 @@ use reqwest::header;
 use serde_json::Value;
 use tokio_stream::StreamExt;
 
-use crate::{connection::CommonConnectionContent, model::param::ToolCall};
+use crate::{connection::{CommonConnectionContent, TokenUsage}, model::param::ToolCall};
 
 pub struct SseConnection;
 
@@ -54,11 +54,19 @@ impl SseConnection {
                         }
                         return;
                     }
+                    
                     let json = serde_json::from_str::<Value>(data);
                     if json.is_err() {
                         continue;
                     }
                     let json = json.unwrap();
+                    
+                    // 检查是否有 usage 字段（流式响应中通常只在最后发送）
+                    if let Some(usage) = json.get("usage") {
+                        if let Ok(token_usage) = serde_json::from_value::<TokenUsage>(usage.clone()) {
+                            yield Ok(CommonConnectionContent::TokenUsage(token_usage));
+                        }
+                    }
                     // 获取内容
                     let choices = json.get("choices");
                     if choices.is_none() {
@@ -195,6 +203,14 @@ impl DirectConnection {
                     if finish_reason.is_some() {
                         res.push(CommonConnectionContent::FinishReason(finish_reason.unwrap()));
                     }
+                    
+                    // 解析 token 使用情况
+                    if let Some(usage) = json.get("usage") {
+                        if let Ok(token_usage) = serde_json::from_value::<TokenUsage>(usage.clone()) {
+                            res.push(CommonConnectionContent::TokenUsage(token_usage));
+                        }
+                    }
+                    
                     return Ok(res);
                 }
             }

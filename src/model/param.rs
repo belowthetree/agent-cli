@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use rmcp::model::Tool;
+use crate::connection::TokenUsage;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelMessage {
@@ -12,6 +13,8 @@ pub struct ModelMessage {
     pub tool_call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<TokenUsage>,
 }
 
 impl ModelMessage {
@@ -23,6 +26,7 @@ impl ModelMessage {
             name: "".into(),
             tool_call_id: "".into(),
             tool_calls: None,
+            token_usage: None,
         }
     }
 
@@ -35,6 +39,7 @@ impl ModelMessage {
             name: "".into(),
             tool_call_id: "".into(),
             tool_calls,
+            token_usage: None,
         }
     }
 
@@ -46,6 +51,7 @@ impl ModelMessage {
             name: "".into(),
             tool_call_id: "".into(),
             tool_calls: None,
+            token_usage: None,
         }
     }
 
@@ -57,6 +63,19 @@ impl ModelMessage {
             name: tool.function.name,
             tool_call_id: tool.id,
             tool_calls: None,
+            token_usage: None,
+        }
+    }
+
+    pub fn token(token_usage: TokenUsage)->Self {
+        Self {
+            role: "system".into(),
+            content: "".into(),
+            think: "".into(),
+            name: "".into(),
+            tool_call_id: "".into(),
+            tool_calls: None,
+            token_usage: Some(token_usage),
         }
     }
 

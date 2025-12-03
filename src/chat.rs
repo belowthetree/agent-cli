@@ -19,6 +19,8 @@ pub struct Chat {
     running: bool,
     /// 最大保存上下文数量
     max_context_num: usize,
+    /// token限制
+    max_tokens: Option<u32>,
 }
 
 impl Default for Chat {
@@ -51,6 +53,7 @@ impl Chat {
             cancel_token: tokio_util::sync::CancellationToken::new(),
             running: false,
             max_context_num: max(config.max_context_num, 5),
+            max_tokens: config.max_tokens,
         }
     }
 
@@ -163,23 +166,33 @@ impl Chat {
                             break;
                         }
                         info!("{:?}", res);
-                        match res {
-                            Ok(res) => {
-                                if res.content.len() > 0 {
-                                    msg.add_content(res.content.clone());
-                                    yield Ok(StreamedChatResponse::Text(res.content));
+                    match res {
+                        Ok(mut res) => {
+                            if res.content.len() > 0 {
+                                msg.add_content(res.content.clone());
+                                yield Ok(StreamedChatResponse::Text(res.content));
+                            }
+                            if res.think.len() > 0 {
+                                msg.add_think(res.think.clone());
+                                yield Ok(StreamedChatResponse::Reasoning(res.think));
+                            }
+                            if let Some(tools) = res.tool_calls {
+                                for tool in tools {
+                                    msg.add_tool(tool.clone());
+                                    yield Ok(StreamedChatResponse::ToolCall(tool));
                                 }
-                                if res.think.len() > 0 {
-                                    msg.add_think(res.think.clone());
-                                    yield Ok(StreamedChatResponse::Reasoning(res.think));
+                            }
+                            // 保存token使用情况
+                            if let Some(usage) = &res.token_usage {
+                                // 先检查token限制（借用）
+                                if self.check_token_limit(Some(usage)) {
+                                    // 超过限制，停止生成
+                                    break;
                                 }
-                                if let Some(tools) = res.tool_calls {
-                                    for tool in tools {
-                                        msg.add_tool(tool.clone());
-                                        yield Ok(StreamedChatResponse::ToolCall(tool));
-                                    }
-                                }
-                            },
+                                // 然后移动值
+                                msg.token_usage = res.token_usage.take();
+                            }
+                        },
                             Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
                         }
                     }
@@ -193,12 +206,12 @@ impl Chat {
                     {
                         let stream = self.call_tool(tool_calls);
                         pin_mut!(stream);
-                        while let Some(res) = stream.next().await {
-                            match res {
-                                Ok(res) => {
-                                    yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
-                                    tool_responses.push(res);
-                                }
+                while let Some(res) = stream.next().await {
+                    match res {
+                        Ok(res) => {
+                            yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
+                            tool_responses.push(res);
+                        }
                                 Err(e) => {
                                     yield Err(e);
                                 }
@@ -242,7 +255,7 @@ impl Chat {
                     }
                     info!("{:?}", res);
                     match res {
-                        Ok(res) => {
+                        Ok(mut res) => {
                             if res.content.len() > 0 {
                                 msg.add_content(res.content.clone());
                                 yield Ok(StreamedChatResponse::Text(res.content));
@@ -256,6 +269,16 @@ impl Chat {
                                     msg.add_tool(tool.clone());
                                     yield Ok(StreamedChatResponse::ToolCall(tool));
                                 }
+                            }
+                            // 保存token使用情况
+                            if let Some(usage) = &res.token_usage {
+                                // 先检查token限制（借用）
+                                if self.check_token_limit(Some(usage)) {
+                                    // 超过限制，停止生成
+                                    break;
+                                }
+                                // 然后移动值
+                                msg.token_usage = res.token_usage.take();
                             }
                         },
                         Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
@@ -305,6 +328,9 @@ impl Chat {
     fn call_tool(&self, tool_calls: Vec<ToolCall>)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {
         let cancel_token = self.cancel_token.clone();
         stream! {
+            if tool_calls.is_empty() {
+                return;
+            }
             let caller = tool_client::ToolClient;
             let stream = caller.call(tool_calls);
             pin_mut!(stream);
@@ -322,6 +348,34 @@ impl Chat {
         if self.context.len() > self.max_context_num {
             self.context.remove(0);
         }
+    }
+
+    /// 检查token使用是否超过限制
+    /// 返回true表示超过限制，应该停止生成
+    fn check_token_limit(&self, new_usage: Option<&crate::connection::TokenUsage>) -> bool {
+        if let Some(max_tokens) = self.max_tokens {
+            // 计算当前上下文的总token使用量
+            let mut total_tokens = 0;
+            
+            // 累加所有消息的token使用量
+            for message in &self.context {
+                if let Some(usage) = &message.token_usage {
+                    total_tokens += usage.total_tokens;
+                }
+            }
+            
+            // 如果提供了新的使用量，加上它
+            if let Some(usage) = new_usage {
+                total_tokens += usage.total_tokens;
+            }
+            
+            // 检查是否超过限制
+            if total_tokens > max_tokens {
+                log::warn!("Token使用超过限制: {}/{} tokens", total_tokens, max_tokens);
+                return true;
+            }
+        }
+        false
     }
 }
 

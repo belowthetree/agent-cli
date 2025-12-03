@@ -1,4 +1,4 @@
-use log::{debug};
+use log::{debug, info};
 use ratatui::{buffer::Buffer, layout::Rect, style::{Style, Stylize}, text::{Line}, widgets::{Block, Borders, ListItem, Padding, Paragraph, Widget, Wrap}};
 
 use crate::{model::param::ModelMessage, tui::get_char_width};
@@ -103,6 +103,15 @@ impl MessageBlock {
             }
             content += "\n工具调用：";
             content += &ct;
+        }
+        
+        // 添加token使用信息显示
+        if let Some(usage) = &self.message.token_usage {
+            info!("TUI 显示 token 使用");
+            content += &format!(
+                "\n\nToken使用: 本次回复消耗 {} tokens (prompt: {}, completion: {}), 总计: {} tokens",
+                usage.completion_tokens, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+            );
         }
         content
     }

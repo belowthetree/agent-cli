@@ -98,6 +98,10 @@ fn max_tokens_default() -> Option<u32> {
     Some(64000)
 }
 
+fn ask_before_tool_execution_default() -> bool {
+    false
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EnvConfig {
     pub key: String,
@@ -117,6 +121,8 @@ pub struct Config {
     pub max_context_num: usize,
     #[serde(default = "max_tokens_default")]
     pub max_tokens: Option<u32>,
+    #[serde(default = "ask_before_tool_execution_default")]
+    pub ask_before_tool_execution: bool,
     pub prompt: Option<String>,
     #[serde(default)]
     pub envs: Vec<EnvConfig>,

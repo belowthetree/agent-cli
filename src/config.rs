@@ -95,7 +95,7 @@ fn max_context_num_default() -> usize {
     10
 }
 fn max_tokens_default() -> Option<u32> {
-    None
+    Some(64000)
 }
 
 #[derive(Debug, Deserialize, Serialize)]

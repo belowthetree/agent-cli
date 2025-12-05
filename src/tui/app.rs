@@ -21,32 +21,52 @@ use crate::{
     tui::{get_char_width, inputarea::InputArea, messageblock::MessageBlock},
 };
 
+/// 终端用户界面应用程序
+/// 
+/// 管理TUI状态、事件处理和渲染逻辑
 pub struct App {
+    /// 聊天会话状态，包含模型上下文和工具配置
     chat: Arc<Mutex<Chat>>,
+    /// 应用程序退出标志
     should_exit: Arc<AtomicBool>,
+    /// 当前垂直滚动位置（行索引）
     index: u16,
+    /// 文本输入区域
     input: InputArea,
+    /// 窗口高度（不包括输入区域）
     window_height: u16,
+    /// 消息块列表，用于渲染
     blocks: Vec<MessageBlock>,
+    /// 当前可用宽度（不包括滚动条）
     width: u16,
+    /// 所有消息的总行数
     max_line: u16,
+    /// 垂直滚动条状态
     vertical_scroll_state: ScrollbarState,
+    /// 接收滚动到底部信号的接收器
     scroll_down_rx: mpsc::Receiver<bool>,
+    /// 发送滚动到底部信号的发送器
     scroll_down_tx: mpsc::Sender<bool>,
+    /// 接收键盘事件的接收器
     event_rx: mpsc::Receiver<Event>,
+    /// 发送键盘事件的发送器
     event_tx: mpsc::Sender<Event>,
+    /// 脏标志，表示需要重新渲染
     dirty: bool,
+    /// 光标在输入区域中的水平偏移（字符宽度）
     cursor_offset: u16,
 }
 
 impl App {
+    /// 创建新的App实例
+    /// 
+    /// 根据命令行参数初始化聊天会话，设置事件通道和滚动信号通道
     pub fn new() -> Self {
         let mut chat = Chat::default();
         let args = Args::parse();
         if Some(true) == args.use_tool {
             chat = chat.tools(mcp::get_config_tools());
         }
-        // chat.context.push(ModelMessage::user("<think>\n嗯，用户让我背诵《静夜思》。首先，我需要确认这首诗的内容。《静夜思》是唐代诗人李白的代表作之一，属于五言绝句。正确的诗句应该是“床前明月光，疑是地上霜。举头望明月，低头思故乡。”。\n\n不过，用户可能有不同的版本或者有其他需求。比如，有时候可能会有错别字或者不同的翻译。我需要先确保自己正确无误地背诵出来。\n\n接下来，我应该用中文回答，因为用户的问题是用中文提出的。可能用户需要这首诗的完整内容，或者希望我解释一下这首诗的背景、含义，或者只是简单的背诵。\n\n用户说“背诵静夜思”，可能只需要我直接背出诗句。不过作为助理，我应该先确认用户的需求。比如，用户可能想让我用中文把这首诗背出来，或者可能想让我用其他方式呈现。\n\n另外，考虑到用户可能不太熟悉这首诗，可能需要一些简要的解释，比如作者、创作背景，或者为什么这首诗著名。不过用户明确说“背诵”，所以可能只需要诗句。\n\n我需要检查一下《静夜思》的正确诗句，避免出错。比如，有没有可能用户指的是其他诗？不过“静夜思”通常就是李白的这首。\n\n确认后，我应该用友好的语气，先背出诗句，然后可能加一点解释，比如“这首诗是唐代诗人李白的名作，表达了诗人对故乡的思念之情。”这样既回答了问题，又提供了额外信息，帮助用户更好地理解。\n\n另外，用户可能希望用某种格式，比如分段或者标点。原诗的标点可能有不同，但通常现代标点是“床前明月光，疑是地上霜。举头望明。低头思故乡。”不过正确的标点应该是“床前明月光，疑是地上霜。举头望明月，低头思故乡。”。\n\n可能用户需要的是正确的诗句，所以我要确保没有错误。比如，有没有可能“望明月”和“思故乡”之间有没有逗号，或者有没有其他变化。\n\n查证一下，标准的《静夜思》是：\n\n床前明月光，\n疑是地上霜。\n举头望明月，\n低头思故乡。\n\n所以，正确的诗句是四句，每句五字，押韵。\n\n现在，我需要用中文回复用户，背诵这首诗。可能用户希望我用现代的标点，或者保留古诗的格式。这里可能用现代的标点，四句，每句逗号分隔，最后一句句号。\n\n另外，作为助理，可能需要确认用户是否需要翻译或者更多解释，但用户说“背诵”，所以可能只需要诗句。不过，为了更友好，可以加一句解释，比如“这首诗是唐代诗人李白的名作，表达了诗人对故乡的深切思念。”\n\n所以，回复的结构可能是：\n\n首先，背诵诗句，然后简要解释。\n\n用户可能只是需要诗句，但作为助理，主动提供一点信息会更好，避免用户需要多次提问。\n\n另外，用户的语言是中文，所以回复要使用中文，避免使用英文或其他语言。\n\n检查是否有其他可能的错误，比如有没有可能用户把“静夜思”和其他诗混淆了。比如，有没有其他诗也叫“静夜思”？但通常来说，李白的这首是最著名的，所以可能性不大。\n\n所以，最终的回复应该是：\n\n“床前明月光，疑是地上霜。举头望明月，低头思故乡。”\n\n然后加一句简短的解释，比如“这首诗是唐代诗人李白的名作，表达了对故乡的深切思念。”\n\n这样既准确又友好，符合用户的需求。\n</think>\n\n床前明月光，  \n疑是地上霜。  \n举头望明月，  \n低头思故乡。  \n\n这是唐代诗人李白的名作《静夜思》，以简洁的意象表达了游子对故乡的深切思念。✨ 需要我进一步解释或翻译吗？".into()));
         let (scroll_tx, scroll_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         Self {
@@ -68,6 +88,16 @@ impl App {
         }
     }
 
+    /// 渲染应用程序界面
+    /// 
+    /// 将应用程序状态渲染到终端帧中，包括：
+    /// - 消息块显示区域
+    /// - 垂直滚动条
+    /// - 文本输入区域
+    /// - 光标位置
+    /// 
+    /// 此方法根据当前滚动位置和窗口大小计算哪些消息块需要显示，
+    /// 并处理部分消息块被截断的情况。
     pub fn render(&mut self, frame: &mut Frame<'_>) {
         let mut area = frame.area();
         // 计算滚动条区域，减去滚动条宽度
@@ -141,6 +171,15 @@ impl App {
         frame.render_widget(&self.input, input_area);
     }
 
+    /// 运行应用程序主循环
+    /// 
+    /// 启动事件监听线程并处理以下任务：
+    /// 1. 监听键盘事件（在后台线程中）
+    /// 2. 当界面需要更新时重新渲染
+    /// 3. 处理用户输入事件
+    /// 4. 响应滚动到底部的信号
+    /// 
+    /// 循环持续运行直到用户退出（按ESC键）或发生错误。
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
         let t = tokio::spawn(Self::watch_events(
             self.event_tx.clone(),
@@ -166,10 +205,21 @@ impl App {
         Ok(())
     }
 
+    /// 监听键盘事件并将其发送到事件通道
     async fn watch_events(tx: mpsc::Sender<Event>, should_exit: Arc<AtomicBool>) -> io::Result<()> {
         while !should_exit.load(Ordering::Relaxed) {
-            if let Event::Key(key) = event::read()? {
-                tx.send(Event::Key(key)).unwrap();
+            match event::read() {
+                Ok(Event::Key(key)) => {
+                    if let Err(e) = tx.send(Event::Key(key)) {
+                        log::error!("Failed to send event: {}", e);
+                        break;
+                    }
+                }
+                Ok(_) => {} // 忽略非键盘事件
+                Err(e) => {
+                    log::error!("Failed to read event: {}", e);
+                    break;
+                }
             }
         }
         Ok(())
@@ -179,105 +229,161 @@ impl App {
         if let Ok(Event::Key(key)) = self.event_rx.try_recv() {
             self.dirty = true;
             if key.kind == KeyEventKind::Press {
-                // 如果模型正在运行，优先取消运行
-                if key.code == KeyCode::Esc {
-                    if self.chat.lock().unwrap().is_running() {
-                        self.chat.lock().unwrap().cancel();
-                    } else {
-                        self.should_exit.store(true, Ordering::Relaxed);
-                    }
-                } else if key.code == KeyCode::Down {
-                    if self.max_line > self.window_height {
-                        self.index = min(self.max_line - self.window_height, self.index + 1);
-                    } else {
-                        self.index = 0;
-                    }
-                } else if key.code == KeyCode::Up && self.index > 0 {
-                    self.index = std::cmp::max(0, self.index - 1);
-                } else if key.code == KeyCode::Left {
-                    self.cursor_offset = self
-                        .cursor_offset
-                        .saturating_sub(self.input.get_previous_char_width(self.cursor_offset));
-                } else if key.code == KeyCode::Right {
-                    self.cursor_offset = std::cmp::min(
-                        self.input.get_content_width(),
-                        self.cursor_offset + self.input.get_width(self.cursor_offset),
-                    );
-                } else if key.code == KeyCode::Delete || key.code == KeyCode::Backspace {
-                    if self.cursor_offset > 0 {
-                        let width = self.input.backspace(self.cursor_offset);
-                        self.cursor_offset = self.cursor_offset.saturating_sub(width);
-                    }
-                }
-                // 发给模型
-                else if key.code == KeyCode::Enter {
-                    if !self.chat.lock().unwrap().is_running() {
-                        // 先检查模型是否在等待调用工具，可能存在工具调用次数用尽退出对话的情况
-                        if self.chat.lock().unwrap().is_waiting_tool() {
-                            // yes / y 为继续，n / no 为清除
-                            let res = self.input.content.to_lowercase();
-                            self.input.clear();
-                            if res == "y" || res == "yes" {
-                                tokio::spawn(Self::handle_chat(
-                                    self.chat.clone(),
-                                    self.input.clone(),
-                                    self.scroll_down_tx.clone(),
-                                ));
-                            }
-                            else if res == "no" || res == "n" {
-                                self.chat.lock().unwrap().reject_tool_call();
-                            }
-                        }
-                        else {
-                            tokio::spawn(Self::handle_chat(
-                                self.chat.clone(),
-                                self.input.clone(),
-                                self.scroll_down_tx.clone(),
-                            ));
-                        }
-                        self.cursor_offset = 0;
-                        self.input.clear();
-                    }
-                } else {
-                    match key.code {
-                        KeyCode::Char(c) => {
-                            let idx = self.input.get_index_by_width(self.cursor_offset);
-                            self.cursor_offset += get_char_width(c);
-                            self.input.add(c, idx as usize);
-                        }
-                        _ => {}
-                    }
+                match key.code {
+                    KeyCode::Esc => self.handle_escape_key(),
+                    KeyCode::Down | KeyCode::Up | KeyCode::Left | KeyCode::Right => 
+                        self.handle_navigation_keys(key.code),
+                    KeyCode::Delete | KeyCode::Backspace => self.handle_delete_keys(),
+                    KeyCode::Enter => self.handle_enter_key(),
+                    KeyCode::Char(c) => self.handle_char_key(c),
+                    _ => {}
                 }
             }
         }
         Ok(())
     }
 
+    /// 处理ESC键：取消运行或退出应用
+    fn handle_escape_key(&mut self) {
+        let chat = self.chat.lock().unwrap();
+        if chat.is_running() {
+            chat.cancel();
+        } else {
+            self.should_exit.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// 处理导航键：上下左右
+    fn handle_navigation_keys(&mut self, key_code: KeyCode) {
+        match key_code {
+            KeyCode::Down => {
+                if self.max_line > self.window_height {
+                    self.index = min(self.max_line - self.window_height, self.index + 1);
+                } else {
+                    self.index = 0;
+                }
+            }
+            KeyCode::Up if self.index > 0 => {
+                self.index = self.index.saturating_sub(1);
+            }
+            KeyCode::Left => {
+                self.cursor_offset = self
+                    .cursor_offset
+                    .saturating_sub(self.input.get_previous_char_width(self.cursor_offset));
+            }
+            KeyCode::Right => {
+                let content_width = self.input.get_content_width();
+                let next_width = self.cursor_offset + self.input.get_width(self.cursor_offset);
+                self.cursor_offset = if next_width > content_width {
+                    content_width
+                } else {
+                    next_width
+                };
+            }
+            _ => {}
+        }
+    }
+
+    /// 处理删除键：Delete和Backspace
+    fn handle_delete_keys(&mut self) {
+        if self.cursor_offset > 0 {
+            let width = self.input.backspace(self.cursor_offset);
+            self.cursor_offset = self.cursor_offset.saturating_sub(width);
+        }
+    }
+
+    /// 处理回车键：发送消息给模型
+    fn handle_enter_key(&mut self) {
+        let mut chat = self.chat.lock().unwrap();
+        if !chat.is_running() {
+            // 先检查模型是否在等待调用工具，可能存在工具调用次数用尽退出对话的情况
+            if chat.is_waiting_tool() {
+                // yes / y 为继续，n / no 为清除
+                let res = self.input.content.to_lowercase();
+                self.input.clear();
+                if res == "y" || res == "yes" {
+                    tokio::spawn(Self::handle_chat(
+                        self.chat.clone(),
+                        self.input.clone(),
+                        self.scroll_down_tx.clone(),
+                    ));
+                } else if res == "no" || res == "n" {
+                    chat.reject_tool_call();
+                }
+            } else {
+                tokio::spawn(Self::handle_chat(
+                    self.chat.clone(),
+                    self.input.clone(),
+                    self.scroll_down_tx.clone(),
+                ));
+            }
+            self.cursor_offset = 0;
+            self.input.clear();
+        }
+    }
+
+    /// 处理字符键：输入文本
+    fn handle_char_key(&mut self, c: char) {
+        let idx = self.input.get_index_by_width(self.cursor_offset);
+        self.cursor_offset += get_char_width(c);
+        self.input.add(c, idx as usize);
+    }
+
+    /// 刷新应用程序显示状态
+    /// 
+    /// 根据当前聊天上下文更新消息块列表和滚动条状态：
+    /// 1. 从聊天上下文中提取用户和助手消息
+    /// 2. 过滤掉系统和工具消息
+    /// 3. 为每条消息创建MessageBlock
+    /// 4. 计算总行数并更新滚动条状态
+    /// 5. 如果工具调用达到上限，显示提示消息
     fn refresh(&mut self) {
         debug!("refresh");
         // 先初始化显示结构
         self.blocks.clear();
         self.max_line = 0;
-        let ctx = self.chat.lock().unwrap();
-        for msg in ctx.context.iter() {
+        
+        // 提取需要的信息，然后释放锁
+        let (messages, is_waiting_tool) = {
+            let ctx = self.chat.lock().unwrap();
+            let messages: Vec<_> = ctx.context.iter().cloned().collect();
+            (messages, ctx.is_waiting_tool() && !ctx.is_running())
+        };
+        
+        // 添加消息块到显示列表
+        for msg in messages {
             // 系统、工具的信息过滤
             if msg.role == "system" || msg.role == "tool" {
                 continue;
             }
             // 空信息也过滤
-            if msg.content.len() <= 0 {
+            if msg.content.is_empty() {
                 continue;
             }
-            let block = MessageBlock::new(msg.clone(), self.width);
-            self.max_line += block.line_count;
-            self.blocks.push(block);
+            self.add_block(MessageBlock::new(msg, self.width));
         }
+        
         // 如果工具调用达到上限而中断
-        if ctx.is_waiting_tool() && !ctx.is_running() {
-            let block = MessageBlock::new(ModelMessage::system("工具调用次数达到设置上限，是否继续，输入 yes/y 继续，no/n 中断".into()), self.width);
-            self.max_line += block.line_count;
-            self.blocks.push(block);
+        if is_waiting_tool {
+            self.add_system_message_block("工具调用次数达到设置上限，是否继续，输入 yes/y 继续，no/n 中断".into());
         }
+        
+        self.update_scrollbar_state();
+    }
+
+    /// 添加系统消息块
+    fn add_system_message_block(&mut self, content: String) {
+        self.add_block(MessageBlock::new(ModelMessage::system(content), self.width));
+    }
+
+    /// 添加消息块并更新总行数
+    fn add_block(&mut self, block: MessageBlock) {
+        self.max_line += block.line_count;
+        self.blocks.push(block);
+    }
+
+    /// 更新滚动条状态
+    fn update_scrollbar_state(&mut self) {
         if self.max_line > self.window_height {
             self.vertical_scroll_state = self
                 .vertical_scroll_state
@@ -288,84 +394,133 @@ impl App {
         self.vertical_scroll_state = self.vertical_scroll_state.position(self.index as usize);
     }
 
-    // 处理模型输出
+    /// 处理与模型的聊天交互
+    /// 
+    /// 此异步方法执行以下操作：
+    /// 1. 将用户输入添加到聊天上下文
+    /// 2. 启动流式聊天响应
+    /// 3. 处理流式响应（文本、工具调用、推理等）
+    /// 4. 发送滚动到底部的信号
+    /// 5. 更新聊天上下文以包含完整的响应和token使用信息
     async fn handle_chat(selfchat: Arc<Mutex<Chat>>, input: InputArea, tx: mpsc::Sender<bool>) {
-        let mut chat = selfchat.lock().unwrap().clone();
+        // 获取聊天实例并克隆
+        let mut chat = {
+            let guard = selfchat.lock().unwrap();
+            guard.clone()
+        };
+        
+        // 添加用户输入到聊天上下文
+        Self::add_user_input_to_context(&selfchat, &input, &mut chat);
+        
+        // 锁定聊天状态并启动流式响应
+        selfchat.lock().unwrap().lock();
+        let stream = chat.stream_rechat();
+        
+        // 发送初始滚动信号
+        Self::send_scroll_signal(&tx);
+        
+        // 处理流式响应
+        Self::process_stream_responses(&selfchat, stream, &tx).await;
+        
+        // 更新聊天上下文并解锁
         {
-            if input.content.len() > 0 {
-                chat.context.push(ModelMessage::user(input.content.clone()));
-                selfchat
-                    .lock()
-                    .unwrap()
-                    .context
-                    .push(ModelMessage::user(input.content.clone()));
+            let mut guard = selfchat.lock().unwrap();
+            guard.context = chat.context;
+            guard.unlock();
+        }
+    }
+
+    /// 添加用户输入到聊天上下文
+    fn add_user_input_to_context(selfchat: &Arc<Mutex<Chat>>, input: &InputArea, chat: &mut Chat) {
+        if !input.content.is_empty() {
+            chat.context.push(ModelMessage::user(input.content.clone()));
+            selfchat
+                .lock()
+                .unwrap()
+                .context
+                .push(ModelMessage::user(input.content.clone()));
+        }
+    }
+
+    /// 发送滚动到底部信号
+    fn send_scroll_signal(tx: &mpsc::Sender<bool>) {
+        if let Err(e) = tx.send(true) {
+            log::error!("Failed to send scroll signal: {}", e);
+        }
+    }
+
+    /// 处理流式响应错误
+    fn handle_stream_error(selfchat: &Arc<Mutex<Chat>>, err: impl std::fmt::Display) {
+        log::error!("Stream response error: {}", err);
+        let mut ctx = selfchat.lock().unwrap();
+        ctx.context.push(ModelMessage::assistant(err.to_string(), "".into(), vec![]));
+    }
+
+    /// 确保上下文中存在一个assistant消息，如果不存在则创建一个
+    fn ensure_assistant_message(ctx: &mut std::sync::MutexGuard<'_, Chat>) -> usize {
+        let last_is_assistant = ctx.context.last()
+            .map(|m| m.role == "assistant")
+            .unwrap_or(false);
+        
+        if !last_is_assistant {
+            ctx.context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
+        }
+        ctx.context.len() - 1
+    }
+
+    /// 处理流式响应
+    async fn handle_stream_response(selfchat: &Arc<Mutex<Chat>>, response: StreamedChatResponse) {
+        match response {
+            StreamedChatResponse::Text(text) => {
+                let mut ctx = selfchat.lock().unwrap();
+                let idx = Self::ensure_assistant_message(&mut ctx);
+                ctx.context[idx].add_content(text);
             }
-            let stream = chat.stream_rechat();
-            selfchat.lock().unwrap().lock();
-            tx.send(true).unwrap();
-            pin_mut!(stream);
-            // 不再手动创建assistant消息，让chat.rs处理
-            loop {
-                tx.send(true).unwrap();
-                if let Some(result) = stream.next().await {
-                    if let Ok(res) = result {
-                        match res {
-                            StreamedChatResponse::Text(text) => {
-                                // 检查是否已经有assistant消息，如果没有则创建
-                                let mut ctx = selfchat.lock().unwrap();
-                                let last_is_assistant = ctx.context.last()
-                                    .map(|m| m.role == "assistant")
-                                    .unwrap_or(false);
-                                
-                                if !last_is_assistant {
-                                    ctx.context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
-                                }
-                                let idx = ctx.context.len() - 1;
-                                ctx.context[idx].add_content(text);
-                            }
-                            StreamedChatResponse::ToolCall(tool_call) => {
-                                let mut ctx = selfchat.lock().unwrap();
-                                let last_is_assistant = ctx.context.last()
-                                    .map(|m| m.role == "assistant")
-                                    .unwrap_or(false);
-                                
-                                if !last_is_assistant {
-                                    ctx.context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
-                                }
-                                let idx = ctx.context.len() - 1;
-                                ctx.context[idx].add_tool(tool_call);
-                            }
-                            StreamedChatResponse::Reasoning(think) => {
-                                let mut ctx = selfchat.lock().unwrap();
-                                let last_is_assistant = ctx.context.last()
-                                    .map(|m| m.role == "assistant")
-                                    .unwrap_or(false);
-                                
-                                if !last_is_assistant {
-                                    ctx.context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
-                                }
-                                let idx = ctx.context.len() - 1;
-                                ctx.context[idx].add_think(think);
-                            }
-                            StreamedChatResponse::ToolResponse(tool) => {
-                                selfchat.lock().unwrap().context.push(tool);
-                            }
-                            StreamedChatResponse::End => {
-                                // End事件表示模型响应完成，此时chat.context中应该已经包含了完整的消息
-                                // 包括token_usage信息
-                            }
-                        }
-                    }
-                    else if let Err(err) = result {
-                        selfchat.lock().unwrap().context.push(ModelMessage::assistant(err.to_string(), "".into(), vec![]));
-                    }
-                } else {
+            StreamedChatResponse::ToolCall(tool_call) => {
+                let mut ctx = selfchat.lock().unwrap();
+                let idx = Self::ensure_assistant_message(&mut ctx);
+                ctx.context[idx].add_tool(tool_call);
+            }
+            StreamedChatResponse::Reasoning(think) => {
+                let mut ctx = selfchat.lock().unwrap();
+                let idx = Self::ensure_assistant_message(&mut ctx);
+                ctx.context[idx].add_think(think);
+            }
+            StreamedChatResponse::ToolResponse(tool) => {
+                let mut ctx = selfchat.lock().unwrap();
+                ctx.context.push(tool);
+            }
+            StreamedChatResponse::End => {
+                // End事件表示模型响应完成，此时chat.context中应该已经包含了完整的消息
+                // 包括token_usage信息
+            }
+        }
+    }
+
+    /// 处理流式响应循环
+    async fn process_stream_responses(
+        selfchat: &Arc<Mutex<Chat>>,
+        stream: impl futures::Stream<Item = Result<StreamedChatResponse, impl std::fmt::Display>>,
+        tx: &mpsc::Sender<bool>,
+    ) {
+        pin_mut!(stream);
+        
+        loop {
+            // 发送滚动信号以确保界面更新
+            Self::send_scroll_signal(tx);
+            
+            match stream.next().await {
+                Some(Ok(response)) => {
+                    Self::handle_stream_response(selfchat, response).await;
+                }
+                Some(Err(err)) => {
+                    Self::handle_stream_error(selfchat, err);
+                    break;
+                }
+                None => {
                     break;
                 }
             }
         }
-        // 使用chat的完整上下文，它包含了token_usage信息
-        selfchat.lock().unwrap().context = chat.context;
-        selfchat.lock().unwrap().unlock();
     }
 }

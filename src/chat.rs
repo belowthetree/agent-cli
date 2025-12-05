@@ -18,9 +18,13 @@ pub struct Chat {
     cancel_token: tokio_util::sync::CancellationToken,
     running: bool,
     /// 最大保存上下文数量
-    max_context_num: usize,
+    pub max_context_num: usize,
     /// token限制
     max_tokens: Option<u32>,
+    /// 是否在工具执行前询问用户确认
+    ask_before_tool_execution: bool,
+    /// 是否正在等待用户确认工具调用
+    waiting_tool_confirmation: bool,
 }
 
 impl Default for Chat {
@@ -54,6 +58,8 @@ impl Chat {
             running: false,
             max_context_num: max(config.max_context_num, 5),
             max_tokens: config.max_tokens,
+            ask_before_tool_execution: config.ask_before_tool_execution,
+            waiting_tool_confirmation: false,
         }
     }
 
@@ -94,6 +100,27 @@ impl Chat {
         false
     }
 
+    /// 检查是否需要询问用户确认工具调用
+    pub fn should_ask_for_tool_confirmation(&self) -> bool {
+        self.ask_before_tool_execution
+    }
+
+    /// 设置等待工具确认状态
+    pub fn set_waiting_tool_confirmation(&mut self, waiting: bool) {
+        self.waiting_tool_confirmation = waiting;
+    }
+
+    /// 检查是否正在等待工具确认
+    pub fn is_waiting_tool_confirmation(&self) -> bool {
+        self.waiting_tool_confirmation
+    }
+
+    /// 确认工具调用
+    pub fn confirm_tool_call(&mut self) {
+        self.waiting_tool_confirmation = false;
+    }
+
+    /// 拒绝工具调用
     pub fn reject_tool_call(&mut self) {
         if let Some(last) = self.context.last().cloned() {
             if let Some(tools) = last.tool_calls {
@@ -102,6 +129,7 @@ impl Chat {
                 }
             }
         }
+        self.waiting_tool_confirmation = false;
     }
 
     // 用已有的上下文再次发送给模型，用于突然中断的情况
@@ -245,43 +273,45 @@ impl Chat {
             let mut count = self.max_tool_try;
             loop {
                 let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
-                let stream = self.client.stream_chat(self.context.clone());
-                pin_mut!(stream);
-                // 接收模型输出
-                while let Some(res) = stream.next().await {
-                    // 检查是否已取消
-                    if cancel_token.is_cancelled() {
-                        break;
-                    }
-                    info!("{:?}", res);
-                    match res {
-                        Ok(mut res) => {
-                            if res.content.len() > 0 {
-                                msg.add_content(res.content.clone());
-                                yield Ok(StreamedChatResponse::Text(res.content));
-                            }
-                            if res.think.len() > 0 {
-                                msg.add_think(res.think.clone());
-                                yield Ok(StreamedChatResponse::Reasoning(res.think));
-                            }
-                            if let Some(tools) = res.tool_calls {
-                                for tool in tools {
-                                    msg.add_tool(tool.clone());
-                                    yield Ok(StreamedChatResponse::ToolCall(tool));
+                {
+                    let stream = self.client.stream_chat(self.context.clone());
+                    pin_mut!(stream);
+                    // 接收模型输出
+                    while let Some(res) = stream.next().await {
+                        // 检查是否已取消
+                        if cancel_token.is_cancelled() {
+                            break;
+                        }
+                        info!("{:?}", res);
+                        match res {
+                            Ok(mut res) => {
+                                if res.content.len() > 0 {
+                                    msg.add_content(res.content.clone());
+                                    yield Ok(StreamedChatResponse::Text(res.content));
                                 }
-                            }
-                            // 保存token使用情况
-                            if let Some(usage) = &res.token_usage {
-                                // 先检查token限制（借用）
-                                if self.check_token_limit(Some(usage)) {
-                                    // 超过限制，停止生成
-                                    break;
+                                if res.think.len() > 0 {
+                                    msg.add_think(res.think.clone());
+                                    yield Ok(StreamedChatResponse::Reasoning(res.think));
                                 }
-                                // 然后移动值
-                                msg.token_usage = res.token_usage.take();
-                            }
-                        },
-                        Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
+                                if let Some(tools) = res.tool_calls {
+                                    for tool in tools {
+                                        msg.add_tool(tool.clone());
+                                        yield Ok(StreamedChatResponse::ToolCall(tool));
+                                    }
+                                }
+                                // 保存token使用情况
+                                if let Some(usage) = &res.token_usage {
+                                    // 先检查token限制（借用）
+                                    if self.check_token_limit(Some(usage)) {
+                                        // 超过限制，停止生成
+                                        break;
+                                    }
+                                    // 然后移动值
+                                    msg.token_usage = res.token_usage.take();
+                                }
+                            },
+                            Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
+                        }
                     }
                 }
                 yield Ok(StreamedChatResponse::End);
@@ -294,26 +324,36 @@ impl Chat {
                 if msg.tool_calls.is_some() && count > 0 {
                     count -= 1;
                     let tool_calls = msg.tool_calls.unwrap();
-                    let mut tool_responses = Vec::new();
-                    {
-                        let stream = self.call_tool(tool_calls);
-                        pin_mut!(stream);
-                        while let Some(res) = stream.next().await {
-                            match res {
-                                Ok(res) => {
-                                    yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
-                                    tool_responses.push(res);
-                                }
-                                Err(e) => {
-                                    yield Err(e);
+                    
+                    // 检查是否需要询问用户确认
+                    if self.should_ask_for_tool_confirmation() {
+                        // 设置等待确认状态
+                        self.set_waiting_tool_confirmation(true);
+                        // 不执行工具调用，等待用户确认
+                        break;
+                    } else {
+                        // 不需要询问，直接执行工具调用
+                        let mut tool_responses = Vec::new();
+                        {
+                            let stream = self.call_tool(tool_calls);
+                            pin_mut!(stream);
+                            while let Some(res) = stream.next().await {
+                                match res {
+                                    Ok(res) => {
+                                        yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
+                                        tool_responses.push(res);
+                                    }
+                                    Err(e) => {
+                                        yield Err(e);
+                                    }
                                 }
                             }
                         }
-                    }
-                    for response in tool_responses {
-                        self.context.push(response);
-                        if self.context.len() > self.max_context_num {
-                            self.context.remove(0);
+                        for response in tool_responses {
+                            self.context.push(response);
+                            if self.context.len() > self.max_context_num {
+                                self.context.remove(0);
+                            }
                         }
                     }
                 }
@@ -325,7 +365,7 @@ impl Chat {
         }
     }
 
-    fn call_tool(&self, tool_calls: Vec<ToolCall>)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {
+    pub fn call_tool(&self, tool_calls: Vec<ToolCall>)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {
         let cancel_token = self.cancel_token.clone();
         stream! {
             if tool_calls.is_empty() {

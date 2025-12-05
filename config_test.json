@@ -1,0 +1,41 @@
+{
+  "api_key": "sk-bd044b1dd7af473c9da04df44d6dc822",
+  "model": "deepseek-chat",
+  "url": "https://api.deepseek.com",
+  "max_context_num": 10,
+  "max_tokens": 64000,
+  "ask_before_tool_execution": true,
+  "mcp": {
+    "server": {
+      "fetch": {
+        "protocol": "stdio",
+        "command": "node",
+        "args": [
+          "E:/Project/fetch-mcp/dist/index.js"
+        ]
+      },
+      "sequential-thinking": {
+        "protocol": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-sequential-thinking"
+        ]
+      },
+      "bilibili": {
+        "protocol": "stdio",
+        "command": "uv",
+        "args": [
+          "--directory",
+          "E:\\Project\\bilibili-mcp-server",
+          "run",
+          "bilibili.py"
+        ]
+      },
+      "rust-filesystem": {
+        "command": "E:\\Project\\mcp\\rust-mcp-filesystem.exe",
+        "args": ["E:\\Project\\agent-cli"]
+      }
+    }
+  }
+}

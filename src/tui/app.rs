@@ -118,20 +118,20 @@ impl App {
             input_area.y + 1,
         ));
         // 处理信息块
-        let st = self.index;
-        let ed = area.height + st;
+        let st = self.index as usize;
+        let ed = area.height as usize + st;
         let mut block_start_line = 0;
-        let mut height = area.height;
+        let mut height = area.height as usize;
         // 计算在范围内的块、显示块
         for blk in self.blocks.iter() {
-            let block_end_line = blk.line_count + block_start_line;
+            let block_end_line = blk.line_count as usize + block_start_line;
             // 在显示范围内
             if block_end_line > st || block_start_line > ed {
                 let mut blk_area = area;
                 let blk_height = min(
                     height,
-                    min(blk.line_count + block_start_line - st, blk.line_count),
-                );
+                    min(blk.line_count as usize + block_start_line - st, blk.line_count as usize),
+                ) as u16;
                 blk_area.height = blk_height;
                 debug!(
                     "显示 {:?} {:?} {} {}",
@@ -143,19 +143,19 @@ impl App {
                     blk.render_block(
                         blk_area,
                         frame.buffer_mut(),
-                        st - block_start_line,
+                        (st - block_start_line) as u16,
                         blk_area.width,
                     );
                 } else {
                     frame.render_widget(blk, blk_area);
                 }
-                height -= blk_area.height;
+                height -= blk_area.height as usize;
                 area.y = min(blk_area.height + area.y, area.height);
             }
             if height <= 0 {
                 break;
             }
-            block_start_line += blk.line_count;
+            block_start_line += blk.line_count as usize;
         }
         // 渲染滚动条
         frame.render_stateful_widget(
@@ -296,8 +296,23 @@ impl App {
     fn handle_enter_key(&mut self) {
         let mut chat = self.chat.lock().unwrap();
         if !chat.is_running() {
-            // 先检查模型是否在等待调用工具，可能存在工具调用次数用尽退出对话的情况
-            if chat.is_waiting_tool() {
+            // 检查是否正在等待工具调用确认
+            if chat.is_waiting_tool_confirmation() {
+                // 处理工具调用确认
+                let res = self.input.content.to_lowercase();
+                self.input.clear();
+                if res == "y" || res == "yes" {
+                    chat.confirm_tool_call();
+                    // 继续执行工具调用
+                    tokio::spawn(Self::handle_tool_execution(
+                        self.chat.clone(),
+                        self.scroll_down_tx.clone(),
+                    ));
+                } else if res == "no" || res == "n" {
+                    chat.reject_tool_call();
+                }
+            } else if chat.is_waiting_tool() {
+                // 先检查模型是否在等待调用工具，可能存在工具调用次数用尽退出对话的情况
                 // yes / y 为继续，n / no 为清除
                 let res = self.input.content.to_lowercase();
                 self.input.clear();
@@ -337,6 +352,7 @@ impl App {
     /// 3. 为每条消息创建MessageBlock
     /// 4. 计算总行数并更新滚动条状态
     /// 5. 如果工具调用达到上限，显示提示消息
+    /// 6. 如果正在等待工具调用确认，显示提示消息
     fn refresh(&mut self) {
         debug!("refresh");
         // 先初始化显示结构
@@ -344,10 +360,10 @@ impl App {
         self.max_line = 0;
         
         // 提取需要的信息，然后释放锁
-        let (messages, is_waiting_tool) = {
+        let (messages, is_waiting_tool, is_waiting_tool_confirmation) = {
             let ctx = self.chat.lock().unwrap();
             let messages: Vec<_> = ctx.context.iter().cloned().collect();
-            (messages, ctx.is_waiting_tool() && !ctx.is_running())
+            (messages, ctx.is_waiting_tool() && !ctx.is_running(), ctx.is_waiting_tool_confirmation())
         };
         
         // 添加消息块到显示列表
@@ -366,6 +382,11 @@ impl App {
         // 如果工具调用达到上限而中断
         if is_waiting_tool {
             self.add_system_message_block("工具调用次数达到设置上限，是否继续，输入 yes/y 继续，no/n 中断".into());
+        }
+        
+        // 如果正在等待工具调用确认
+        if is_waiting_tool_confirmation {
+            self.add_system_message_block("检测到工具调用，是否执行？输入 yes/y 执行，no/n 取消".into());
         }
         
         self.update_scrollbar_state();
@@ -522,5 +543,63 @@ impl App {
                 }
             }
         }
+    }
+
+    /// 处理工具执行
+    async fn handle_tool_execution(selfchat: Arc<Mutex<Chat>>, tx: mpsc::Sender<bool>) {
+        // 获取聊天实例并克隆
+        let chat = {
+            let guard = selfchat.lock().unwrap();
+            guard.clone()
+        };
+        
+        // 锁定聊天状态
+        selfchat.lock().unwrap().lock();
+        
+        // 获取最后一个消息中的工具调用
+        let tool_calls = {
+            let guard = selfchat.lock().unwrap();
+            if let Some(last) = guard.context.last() {
+                if let Some(tools) = &last.tool_calls {
+                    tools.clone()
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
+        };
+        
+        if !tool_calls.is_empty() {
+            // 执行工具调用
+            let stream = chat.call_tool(tool_calls);
+            pin_mut!(stream);
+            
+            // 发送滚动信号
+            Self::send_scroll_signal(&tx);
+            
+            // 处理工具响应
+            while let Some(res) = stream.next().await {
+                match res {
+                    Ok(tool_response) => {
+                        // 添加工具响应到上下文
+                        let mut guard = selfchat.lock().unwrap();
+                        guard.context.push(tool_response);
+                        if guard.context.len() > guard.max_context_num {
+                            guard.context.remove(0);
+                        }
+                        // 发送滚动信号
+                        Self::send_scroll_signal(&tx);
+                    }
+                    Err(e) => {
+                        log::error!("工具调用错误: {}", e);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // 解锁聊天状态
+        selfchat.lock().unwrap().unlock();
     }
 }

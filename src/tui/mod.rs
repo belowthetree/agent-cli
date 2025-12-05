@@ -4,6 +4,10 @@ mod messageblock;
 mod app;
 mod messagetext;
 mod inputarea;
+mod event_handler;
+mod chat_handler;
+mod renderer;
+mod state_manager;
 
 pub async fn run() {
     color_eyre::install().unwrap();

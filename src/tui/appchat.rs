@@ -1,7 +1,7 @@
 use std::sync::{mpsc, Arc, Mutex};
 
 use futures::{pin_mut, StreamExt};
-use log::error;
+use log::{error, info};
 
 use crate::{
     chat::{Chat, StreamedChatResponse},
@@ -26,6 +26,15 @@ impl AppChat {
         input: InputArea,
         tx: mpsc::Sender<bool>,
     ) {
+        // 检查是否正在等待对话轮次确认
+        {
+            let guard = selfchat.lock().unwrap();
+            if guard.is_waiting_context_confirmation() {
+                // 如果正在等待确认，不处理新的聊天
+                return;
+            }
+        }
+        
         // 获取聊天实例并克隆
         let mut chat = {
             let guard = selfchat.lock().unwrap();
@@ -49,6 +58,7 @@ impl AppChat {
         {
             let mut guard = selfchat.lock().unwrap();
             guard.context = chat.context;
+            // 对话轮次是直接改动的 selfchat，因此无需再更新
             guard.unlock();
         }
     }
@@ -120,6 +130,17 @@ impl AppChat {
             StreamedChatResponse::End => {
                 // End事件表示模型响应完成，此时chat.context中应该已经包含了完整的消息
                 // 包括token_usage信息
+                
+                // 增加对话轮次计数（模型每次回复时增加1）
+                let mut ctx = selfchat.lock().unwrap();
+                ctx.increment_conversation_turn();
+                
+                // 检查是否超过最大对话轮次
+                info!("对话轮次 {:?}", ctx.get_conversation_turn_info());
+                if ctx.is_over_context_limit() {
+                    // 设置等待确认状态
+                    ctx.set_waiting_context_confirmation(true);
+                }
             }
         }
     }
@@ -194,9 +215,6 @@ impl AppChat {
                         // 添加工具响应到上下文
                         let mut guard = selfchat.lock().unwrap();
                         guard.context.push(tool_response);
-                        if guard.context.len() > guard.max_context_num {
-                            guard.context.remove(0);
-                        }
                         // 发送滚动信号
                         Self::send_scroll_signal(&tx);
                     }

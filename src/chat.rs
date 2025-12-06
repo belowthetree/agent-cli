@@ -17,14 +17,18 @@ pub struct Chat {
     max_tool_try: usize,
     cancel_token: tokio_util::sync::CancellationToken,
     running: bool,
-    /// 最大保存上下文数量
-    pub max_context_num: usize,
     /// token限制
     max_tokens: Option<u32>,
     /// 是否在工具执行前询问用户确认
     ask_before_tool_execution: bool,
     /// 是否正在等待用户确认工具调用
     waiting_tool_confirmation: bool,
+    /// 对话轮次统计
+    conversation_turn_count: usize,
+    /// 最大对话轮次数
+    max_context_num: usize,
+    /// 是否正在等待对话轮次确认
+    waiting_context_confirmation: bool,
 }
 
 impl Default for Chat {
@@ -56,10 +60,12 @@ impl Chat {
             max_tool_try: max_try,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             running: false,
-            max_context_num: max(config.max_context_num, 5),
             max_tokens: config.max_tokens,
             ask_before_tool_execution: config.ask_before_tool_execution,
             waiting_tool_confirmation: false,
+            conversation_turn_count: 0,
+            max_context_num: config.max_context_num,
+            waiting_context_confirmation: false,
         }
     }
 
@@ -165,9 +171,6 @@ impl Chat {
             }
             for response in tool_responses {
                 self.context.push(response);
-                if self.context.len() > self.max_context_num {
-                    self.context.remove(0);
-                }
             }
             let stream = self.handle_stream_chat();
             pin_mut!(stream);
@@ -316,9 +319,6 @@ impl Chat {
                 }
                 yield Ok(StreamedChatResponse::End);
                 self.context.push(msg.clone());
-                if self.context.len() > self.max_context_num {
-                    self.context.remove(0);
-                }
                 // 处理工具调用
                 info!("工具数 {:?}", msg.tool_calls);
                 if msg.tool_calls.is_some() && count > 0 {
@@ -351,9 +351,6 @@ impl Chat {
                         }
                         for response in tool_responses {
                             self.context.push(response);
-                            if self.context.len() > self.max_context_num {
-                                self.context.remove(0);
-                            }
                         }
                     }
                 }
@@ -385,9 +382,36 @@ impl Chat {
 
     fn add_message(&mut self, msg: ModelMessage) {
         self.context.push(msg);
-        if self.context.len() > self.max_context_num {
-            self.context.remove(0);
-        }
+    }
+
+    /// 增加对话轮次计数
+    pub fn increment_conversation_turn(&mut self) {
+        self.conversation_turn_count += 1;
+    }
+
+    /// 重置对话轮次计数
+    pub fn reset_conversation_turn(&mut self) {
+        self.conversation_turn_count = 0;
+    }
+
+    /// 检查是否超过最大对话轮次
+    pub fn is_over_context_limit(&self) -> bool {
+        self.conversation_turn_count >= self.max_context_num
+    }
+
+    /// 设置等待对话轮次确认状态
+    pub fn set_waiting_context_confirmation(&mut self, waiting: bool) {
+        self.waiting_context_confirmation = waiting;
+    }
+
+    /// 检查是否正在等待对话轮次确认
+    pub fn is_waiting_context_confirmation(&self) -> bool {
+        self.waiting_context_confirmation
+    }
+
+    /// 获取当前对话轮次统计
+    pub fn get_conversation_turn_info(&self) -> (usize, usize) {
+        (self.conversation_turn_count, self.max_context_num)
     }
 
     /// 检查token使用是否超过限制

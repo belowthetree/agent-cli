@@ -3,7 +3,7 @@ use std::{
     sync::{atomic::AtomicBool, mpsc, Arc},
 };
 
-use log::error;
+use log::{error, info};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
 use crate::tui::app::App;
@@ -88,8 +88,34 @@ impl AppEvent {
     pub fn handle_enter_key(app: &mut App) {
         let mut chat = app.chat.lock().unwrap();
         if !chat.is_running() {
+            // 检查是否正在等待对话轮次确认
+            if chat.is_waiting_context_confirmation() {
+                // 处理对话轮次确认
+                let res = app.input.content.to_lowercase();
+                app.input.clear();
+                if res == "y" || res == "yes" {
+                    info!("重置对话");
+                    // 用户选择继续，重置对话轮次计数
+                    chat.reset_conversation_turn();
+                    chat.set_waiting_context_confirmation(false);
+                    // 继续处理当前输入
+                    let input_clone = app.input.clone();
+                    let chat_clone = app.chat.clone();
+                    let scroll_tx_clone = app.scroll_down_tx.clone();
+                    tokio::spawn(async move {
+                        crate::tui::appchat::AppChat::handle_chat(
+                            chat_clone,
+                            input_clone,
+                            scroll_tx_clone,
+                        ).await;
+                    });
+                } else if res == "no" || res == "n" {
+                    // 用户选择停止，清除等待状态但不重置计数
+                    chat.set_waiting_context_confirmation(false);
+                }
+            }
             // 检查是否正在等待工具调用确认
-            if chat.is_waiting_tool_confirmation() {
+            else if chat.is_waiting_tool_confirmation() {
                 // 处理工具调用确认
                 let res = app.input.content.to_lowercase();
                 app.input.clear();

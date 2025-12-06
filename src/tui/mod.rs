@@ -4,8 +4,8 @@ mod messageblock;
 mod app;
 mod messagetext;
 mod inputarea;
-mod event_handler;
-mod chat_handler;
+mod appevent;
+mod appchat;
 mod renderer;
 mod state_manager;
 

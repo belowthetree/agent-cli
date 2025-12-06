@@ -10,9 +10,9 @@ use crate::{
 };
 
 /// 聊天处理器，负责处理聊天和工具执行逻辑
-pub struct ChatHandler;
+pub struct AppChat;
 
-impl ChatHandler {
+impl AppChat {
     /// 处理与模型的聊天交互
     /// 
     /// 此异步方法执行以下操作：

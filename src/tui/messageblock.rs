@@ -105,15 +105,19 @@ impl MessageBlock {
             content += &ct;
         }
         
+        content
+    }
+
+    pub fn get_bottom_content(&self)->String {
         // 添加token使用信息显示
         if let Some(usage) = &self.message.token_usage {
-            info!("TUI 显示 token 使用");
-            content += &format!(
+            info!("TUI 显示 token");
+            return format!(
                 "\n\nToken使用: 本次回复消耗 {} tokens (prompt: {}, completion: {}), 总计: {} tokens",
                 usage.completion_tokens, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
             );
         }
-        content
+        return String::new();
     }
 }
 
@@ -122,6 +126,7 @@ impl Widget for &MessageBlock {
     where Self: Sized {
         let block = Block::default()
             .title(self.message.role.as_str())
+            .title_bottom(self.get_bottom_content())
             .padding(Padding::ZERO)
             .style(Style::new().light_blue())
             .borders(Borders::ALL);

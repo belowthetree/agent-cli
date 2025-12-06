@@ -15,7 +15,7 @@ use crate::{
     chat::Chat,
     mcp,
     tui::{
-        event_handler::EventHandler,
+        appevent::AppEvent,
         inputarea::InputArea,
         messageblock::MessageBlock,
         renderer::Renderer,
@@ -114,7 +114,7 @@ impl App {
     /// 
     /// 循环持续运行直到用户退出（按ESC键）或发生错误。
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
-        let t = tokio::spawn(EventHandler::watch_events(
+        let t = tokio::spawn(AppEvent::watch_events(
             self.event_tx.clone(),
             self.should_exit.clone(),
         ));
@@ -125,7 +125,7 @@ impl App {
                 })?;
                 self.dirty = false;
             }
-            EventHandler::handle_events(&mut self)?;
+            AppEvent::handle_events(&mut self)?;
             // 正在运行的话始终拉到最底部
             if self.scroll_down_rx.try_recv().is_ok() {
                 self.dirty = true;

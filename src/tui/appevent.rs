@@ -9,9 +9,9 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crate::tui::app::App;
 
 /// 事件处理器，负责处理键盘事件和事件监听
-pub struct EventHandler;
+pub struct AppEvent;
 
-impl EventHandler {
+impl AppEvent {
     /// 监听键盘事件并将其发送到事件通道
     pub async fn watch_events(
         tx: mpsc::Sender<Event>,
@@ -96,7 +96,7 @@ impl EventHandler {
                 if res == "y" || res == "yes" {
                     chat.confirm_tool_call();
                     // 继续执行工具调用
-                    tokio::spawn(crate::tui::chat_handler::ChatHandler::handle_tool_execution(
+                    tokio::spawn(crate::tui::appchat::AppChat::handle_tool_execution(
                         app.chat.clone(),
                         app.scroll_down_tx.clone(),
                     ));
@@ -109,7 +109,7 @@ impl EventHandler {
                 let res = app.input.content.to_lowercase();
                 app.input.clear();
                 if res == "y" || res == "yes" {
-                    tokio::spawn(crate::tui::chat_handler::ChatHandler::handle_chat(
+                    tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
                         app.chat.clone(),
                         app.input.clone(),
                         app.scroll_down_tx.clone(),
@@ -118,7 +118,7 @@ impl EventHandler {
                     chat.reject_tool_call();
                 }
             } else {
-                tokio::spawn(crate::tui::chat_handler::ChatHandler::handle_chat(
+                tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
                     app.chat.clone(),
                     app.input.clone(),
                     app.scroll_down_tx.clone(),

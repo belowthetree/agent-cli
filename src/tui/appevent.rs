@@ -49,14 +49,24 @@ impl AppEvent {
     pub fn handle_navigation_keys(app: &mut App, key_code: KeyCode) {
         match key_code {
             KeyCode::Down => {
-                if app.max_line > app.window_height {
-                    app.index = std::cmp::min(app.max_line - app.window_height, app.index + 1);
+                // 如果显示命令提示，则选择下一个命令提示
+                if app.input.should_show_suggestions() {
+                    app.input.next_suggestion();
                 } else {
-                    app.index = 0;
+                    if app.max_line > app.window_height {
+                        app.index = std::cmp::min(app.max_line - app.window_height, app.index + 1);
+                    } else {
+                        app.index = 0;
+                    }
                 }
             }
-            KeyCode::Up if app.index > 0 => {
-                app.index = app.index.saturating_sub(1);
+            KeyCode::Up => {
+                // 如果显示命令提示，则选择上一个命令提示
+                if app.input.should_show_suggestions() {
+                    app.input.previous_suggestion();
+                } else if app.index > 0 {
+                    app.index = app.index.saturating_sub(1);
+                }
             }
             KeyCode::Left => {
                 app.cursor_offset = app
@@ -81,11 +91,28 @@ impl AppEvent {
         if app.cursor_offset > 0 {
             let width = app.input.backspace(app.cursor_offset);
             app.cursor_offset = app.cursor_offset.saturating_sub(width);
+            // 检查是否需要更新命令提示
+            app.check_command_suggestions();
         }
     }
 
-    /// 处理回车键：发送消息给模型
+    /// 处理回车键：发送消息给模型或执行命令
     pub fn handle_enter_key(app: &mut App) {
+        // 首先检查是否显示命令提示
+        if app.input.should_show_suggestions() {
+            // 获取选中的命令并克隆它，以释放对app.input的借用
+            let command = app.input.get_selected_command().cloned();
+            if let Some(command) = command {
+                // 执行选中的命令
+                app.execute_command(&command);
+                // 清空输入并隐藏命令提示
+                app.input.clear();
+                app.input.hide_suggestions();
+                app.cursor_offset = 0;
+                return;
+            }
+        }
+        
         let mut chat = app.chat.lock().unwrap();
         if !chat.is_running() {
             // 检查是否正在等待对话轮次确认
@@ -160,6 +187,8 @@ impl AppEvent {
         let idx = app.input.get_index_by_width(app.cursor_offset);
         app.cursor_offset += crate::tui::get_char_width(c);
         app.input.add(c, idx as usize);
+        // 检查是否需要更新命令提示
+        app.check_command_suggestions();
     }
 
     /// 处理所有事件

@@ -19,16 +19,28 @@ impl ToolClient {
                 // 验证工具名称
                 if call.function.name.is_empty() {
                     warn!("工具名称不能为空");
-                    yield Err(anyhow::anyhow!("工具名称不能为空"));
+                    // 创建包含错误信息的工具响应，返还给模型
+                    let error_content = serde_json::json!({
+                        "error": true,
+                        "message": "工具名称不能为空",
+                        "details": "工具调用缺少名称"
+                    }).to_string();
+                    yield Ok(ModelMessage::tool(error_content, call.clone()));
                     continue;
                 }
 
-                // 解析JSON参数，如果解析失败则返回错误
+                // 解析JSON参数，如果解析失败则返回错误工具响应
                 let arguments: Value = match serde_json::from_str(&call.function.arguments) {
                     Ok(args) => args,
                     Err(e) => {
                         warn!("JSON参数解析失败: {}", e);
-                        yield Err(anyhow::anyhow!("JSON参数解析失败: {}", e));
+                        // 创建包含错误信息的工具响应，返还给模型
+                        let error_content = serde_json::json!({
+                            "error": true,
+                            "message": format!("JSON参数解析失败: {}", e),
+                            "details": e.to_string()
+                        }).to_string();
+                        yield Ok(ModelMessage::tool(error_content, call.clone()));
                         continue;
                     }
                 };
@@ -41,8 +53,13 @@ impl ToolClient {
                         yield Ok(ModelMessage::tool(s, call.clone()));
                     }
                     Err(e) => {
-                        // 工具调用错误应该作为错误返回，而不是包装为成功的消息
-                        yield Err(anyhow::anyhow!("工具调用失败: {}", e));
+                        // 工具调用错误也应该作为工具响应返还给模型
+                        let error_content = serde_json::json!({
+                            "error": true,
+                            "message": format!("工具调用失败: {}", e),
+                            "details": e.to_string()
+                        }).to_string();
+                        yield Ok(ModelMessage::tool(error_content, call.clone()));
                     }
                 }
             }

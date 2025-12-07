@@ -79,6 +79,7 @@ impl MessageBlock {
     pub fn render_block(&self, area: Rect, buf: &mut Buffer, start_line: u16, viewwidth: u16) {
         let block = Block::default()
             .title(self.message.role.as_str())
+            .title_bottom(self.get_bottom_content())
             .padding(Padding::ZERO)
             .style(Style::new().light_blue())
             .borders(Borders::ALL);

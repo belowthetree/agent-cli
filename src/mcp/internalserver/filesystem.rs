@@ -79,61 +79,31 @@ impl FileSystemTool {
     }
 
     /// 列出目录内容
-    fn list_directory(&self, path: &Path, recursive: bool) -> Result<Vec<String>> {
+    fn list_directory(&self, path: &Path) -> Result<Vec<String>> {
         if Self::needs_confirmation(path) {
             return Err(anyhow!("路径 '{}' 不在当前工作目录下，需要用户手动同意", path.display()));
         }
 
         let mut results = Vec::new();
-        
-        if recursive {
-            Self::list_directory_recursive(path, &mut results, 0)?;
-        } else {
-            let entries = fs::read_dir(path)
-                .map_err(|e| anyhow!("读取目录失败: {}", e))?;
-            
-            for entry in entries {
-                let entry = entry.map_err(|e| anyhow!("读取目录项失败: {}", e))?;
-                let path = entry.path();
-                let name = path.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                
-                if path.is_dir() {
-                    results.push(format!("{}/", name));
-                } else {
-                    results.push(name);
-                }
-            }
-        }
-        
-        Ok(results)
-    }
-
-    /// 递归列出目录内容
-    fn list_directory_recursive(path: &Path, results: &mut Vec<String>, depth: usize) -> Result<()> {
         let entries = fs::read_dir(path)
             .map_err(|e| anyhow!("读取目录失败: {}", e))?;
         
         for entry in entries {
             let entry = entry.map_err(|e| anyhow!("读取目录项失败: {}", e))?;
-            let entry_path = entry.path();
-            let relative_path = entry_path.strip_prefix(path)
-                .unwrap_or(&entry_path);
+            let path = entry.path();
+            let name = path.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             
-            let prefix = "  ".repeat(depth);
-            let display_path = relative_path.to_string_lossy();
-            
-            if entry_path.is_dir() {
-                results.push(format!("{}{}/", prefix, display_path));
-                Self::list_directory_recursive(&entry_path, results, depth + 1)?;
+            if path.is_dir() {
+                results.push(format!("{}/", name));
             } else {
-                results.push(format!("{}{}", prefix, display_path));
+                results.push(name);
             }
         }
         
-        Ok(())
+        Ok(results)
     }
 }
 
@@ -199,16 +169,12 @@ impl InternalTool for FileSystemTool {
             }
             
             "list" => {
-                let recursive = args.get("recursive")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
                 
-                let entries = self.list_directory(path, recursive)?;
+                let entries = self.list_directory(path)?;
                 let result = serde_json::json!({
                     "success": true,
                     "entries": entries,
-                    "path": path_str,
-                    "recursive": recursive
+                    "path": path_str
                 });
                 
                 Ok(CallToolResult {
@@ -273,10 +239,6 @@ impl InternalTool for FileSystemTool {
         "content": {
             "type": "string",
             "description": "写入文件时的内容（仅用于 write 操作）"
-        },
-        "recursive": {
-            "type": "boolean",
-            "description": "是否递归列出目录（仅用于 list 操作，默认 false）"
         }
     },
     "required": ["operation", "path"]

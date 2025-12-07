@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 
 pub mod choosetool;
 pub mod getbesttool;
+pub mod filesystem;
 
 #[async_trait]
 pub trait InternalTool: Send + Sync + Debug {

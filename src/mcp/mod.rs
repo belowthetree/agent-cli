@@ -6,10 +6,11 @@ pub mod mcp_tool;
 use log::{info, warn};
 pub use mcp_manager::*;
 pub use mcp_tool::McpTool;
+use std::sync::Arc;
 
 use crate::{
     config,
-    mcp::internalserver::{InternalTool, getbesttool::GetBestTool},
+    mcp::internalserver::{InternalTool, getbesttool::GetBestTool, filesystem::FileSystemTool},
 };
 
 pub async fn init() {
@@ -34,12 +35,15 @@ pub async fn init() {
     for tool in tools.iter() {
         info!("{}", tool.name());
     }
-    // let _ = mgr.add_internal_tool(Arc::new(GetBestTool));
+    let _ = mgr.add_internal_tool(Arc::new(FileSystemTool));
 }
 
 #[allow(unused)]
 pub fn get_basic_tools() -> Vec<McpTool> {
-    vec![McpTool::new(GetBestTool.get_mcp_tool(), "".into(), false)]
+    vec![
+        McpTool::new(GetBestTool.get_mcp_tool(), "".into(), false),
+        McpTool::new(FileSystemTool.get_mcp_tool(), "".into(), false),
+    ]
 }
 
 pub fn get_config_tools() -> Vec<McpTool> {

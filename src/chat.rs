@@ -8,7 +8,7 @@ use crate::client::tool_client;
 use crate::config::{self, Config};
 use crate::mcp::{McpTool};
 use crate::model::param::{ModelMessage, ToolCall};
-use crate::prompt::CHAT_PROMPT;
+use crate::prompt;
 
 #[derive(Clone)]
 pub struct Chat {
@@ -56,7 +56,10 @@ impl Chat {
                 config.model.unwrap_or("deepseek-chat".into()),
                 vec![],
             ),
-            context: vec![ModelMessage::system(config.prompt.unwrap_or(CHAT_PROMPT.into()))],
+            context: vec![ModelMessage::system(
+                config.prompt.map(|p| prompt::build_enhanced_prompt(&p))
+                    .unwrap_or_else(|| prompt::get_default_enhanced_prompt())
+            )],
             max_tool_try: max_try,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             running: false,
@@ -420,11 +423,9 @@ impl Chat {
         if let Some(max_tokens) = self.max_tokens {
             // 计算当前上下文的总token使用量
             let mut total_tokens = 0;
-            
-            // 累加所有消息的token使用量
-            for message in &self.context {
-                if let Some(usage) = &message.token_usage {
-                    total_tokens += usage.total_tokens;
+            if let Some(last) = self.context.last() {
+                if let Some(usage) = &last.token_usage {
+                    total_tokens = usage.total_tokens;
                 }
             }
             

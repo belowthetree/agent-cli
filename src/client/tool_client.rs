@@ -59,6 +59,7 @@ impl ToolClient {
                             "message": format!("工具调用失败: {}", e),
                             "details": e.to_string()
                         }).to_string();
+                        warn!("JSON参数解析失败: {}", error_content);
                         yield Ok(ModelMessage::tool(error_content, call.clone()));
                     }
                 }

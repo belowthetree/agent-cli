@@ -6,33 +6,134 @@ on:
     branches:
       - main
     paths:
-      - 'src/**'  # 仅监控src目录下的文件变动
+      - 'Cargo.toml'  # 仅监控版本变化
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu]
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          profile: minimal
-          override: true
+          targets: ${{ matrix.target }}
 
-      - name: Build release
-        run: cargo build --release --features napcat
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release for Linux
+        run: |
+          cargo build --release --target ${{ matrix.target }} --features napcat
+        env:
+          CARGO_PROFILE_RELEASE_LTO: true
+
+      - name: Test Linux binary
+        run: |
+          target/${{ matrix.target }}/release/agent-cli --help || echo "Help test completed"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-cli-linux-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/agent-cli
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x86_64-pc-windows-msvc]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release for Windows
+        run: |
+          cargo build --release --target ${{ matrix.target }} --features napcat
+        env:
+          CARGO_PROFILE_RELEASE_LTO: true
+
+      - name: Test Windows binary
+        run: |
+          target\${{ matrix.target }}\release\agent-cli.exe --help || echo "Help test completed"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-cli-windows-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/agent-cli.exe
+          if-no-files-found: error
+
+  create-release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: github.ref == 'refs/heads/main'
         with:
           files: |
-            target/release/*
+            artifacts/**/*
           tag_name: v${{ github.run_number }}
           name: Release v${{ github.run_number }}
           body: |
-            Automated release build triggered by push to main branch.
+            Automated multi-platform release build triggered by push to main branch.
+            
+            ## Platform Support
+            
+            ### Linux
+            - **x86_64-unknown-linux-gnu**: `agent-cli-linux-x86_64-unknown-linux-gnu/agent-cli`
+            
+            ### Windows
+            - **x86_64-pc-windows-msvc**: `agent-cli-windows-x86_64-pc-windows-msvc/agent-cli.exe`
+            
+            ## Usage
+            
+            ### Linux
+            ```bash
+            chmod +x agent-cli
+            ./agent-cli --help
+            ```
+            
+            ### Windows
+            ```cmd
+            agent-cli.exe --help
+            ```

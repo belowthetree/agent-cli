@@ -103,19 +103,21 @@ impl AppEvent {
             // 获取选中的命令并克隆它，以释放对app.input的借用
             let command = app.input.get_selected_command().cloned();
             if let Some(command) = command {
-                // 在当前线程中同步执行异步命令
-                // 使用block_in_place来避免阻塞整个运行时
-                let future = app.execute_command(&command);
-                let handle = tokio::runtime::Handle::current();
-                
-                // 使用block_on在当前线程中执行异步命令
-                // 注意：这可能会阻塞当前线程，但命令执行应该很快
-                let _ = handle.block_on(future);
-                
                 // 清空输入并隐藏命令提示
                 app.input.clear();
                 app.input.hide_suggestions();
                 app.cursor_offset = 0;
+                
+                // 使用block_in_place来执行阻塞操作
+                // 这会通知Tokio运行时当前线程将暂时阻塞
+                tokio::task::block_in_place(|| {
+                    // 在block_in_place中创建新的运行时
+                    // 这会在当前线程中创建一个新的运行时，而不是在Tokio工作线程中
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        app.execute_command(&command).await;
+                    });
+                });
                 return;
             }
         }

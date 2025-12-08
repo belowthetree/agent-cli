@@ -39,10 +39,6 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_LTO: true
 
-      - name: Test Linux binary
-        run: |
-          target/${{ matrix.target }}/release/agent-cli --help || echo "Help test completed"
-
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
@@ -79,10 +75,6 @@ jobs:
           cargo build --release --target ${{ matrix.target }} --features napcat
         env:
           CARGO_PROFILE_RELEASE_LTO: true
-
-      - name: Test Windows binary
-        run: |
-          target\${{ matrix.target }}\release\agent-cli.exe --help || echo "Help test completed"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4

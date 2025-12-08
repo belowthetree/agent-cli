@@ -114,7 +114,7 @@ impl TuiCommand for HelpCommand {
             help_text.push_str(&format!("  /{} - {}\n", cmd.name(), cmd.description()));
         }
         
-        app.add_system_message(&help_text);
+        app.add_info_message(&help_text);
         true
     }
 }
@@ -135,9 +135,10 @@ impl TuiCommand for ClearCommand {
     
     async fn execute(&self, app: &mut crate::tui::app::App, _args: &str) -> bool {
         app.blocks.clear();
+        app.info_messages.clear();
         app.max_line = 0;
         app.index = 0;
-        app.add_system_message("聊天记录已清除");
+        app.add_system_message("聊天记录和信息消息已清除");
         true
     }
 }

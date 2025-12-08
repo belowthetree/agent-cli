@@ -14,11 +14,12 @@ impl StateManager {
     /// 根据当前聊天上下文更新消息块列表和滚动条状态：
     /// 1. 从聊天上下文中提取用户和助手消息
     /// 2. 过滤掉系统和工具消息
-    /// 3. 为每条消息创建MessageBlock
-    /// 4. 计算总行数并更新滚动条状态
-    /// 5. 如果工具调用达到上限，显示提示消息
-    /// 6. 如果正在等待工具调用确认，显示提示消息
-    /// 7. 如果正在等待对话轮次确认，显示提示消息
+    /// 3. 合并信息消息（按照插入位置插入到聊天消息之间）
+    /// 4. 为每条消息创建MessageBlock
+    /// 5. 计算总行数并更新滚动条状态
+    /// 6. 如果工具调用达到上限，显示提示消息
+    /// 7. 如果正在等待工具调用确认，显示提示消息
+    /// 8. 如果正在等待对话轮次确认，显示提示消息
     pub fn refresh(app: &mut App) {
         debug!("refresh");
         // 先初始化显示结构
@@ -33,16 +34,50 @@ impl StateManager {
             (messages, ctx.is_waiting_tool() && !ctx.is_running(), ctx.is_waiting_tool_confirmation(), ctx.is_waiting_context_confirmation(), conversation_turn_info)
         };
         
-        // 添加消息块到显示列表
-        for msg in messages {
-            // 系统、工具的信息过滤
-            if msg.role == "system" || msg.role == "tool" {
-                continue;
+        // 合并聊天消息和信息消息
+        let mut all_messages: Vec<ModelMessage> = Vec::new();
+        let mut chat_index = 0;
+        let mut info_index = 0;
+        
+        // 对信息消息按插入位置排序（它们应该已经按添加顺序排序）
+        let mut sorted_info_messages = app.info_messages.clone();
+        sorted_info_messages.sort_by_key(|&(pos, _)| pos);
+        
+        // 合并算法：按照插入位置将信息消息插入到聊天消息之间
+        while chat_index < messages.len() || info_index < sorted_info_messages.len() {
+            // 检查是否有信息消息需要插入到当前位置
+            while info_index < sorted_info_messages.len() {
+                let (insert_pos, ref info_msg) = sorted_info_messages[info_index];
+                if insert_pos <= chat_index {
+                    // 插入位置小于等于当前位置，插入信息消息
+                    all_messages.push(info_msg.clone());
+                    info_index += 1;
+                } else {
+                    // 插入位置大于当前位置，先处理聊天消息
+                    break;
+                }
             }
-            // 空信息也过滤
-            if msg.content.is_empty() {
-                continue;
+            
+            // 处理当前聊天消息
+            if chat_index < messages.len() {
+                let msg = messages[chat_index].clone();
+                // 系统、工具的信息过滤
+                if msg.role != "system" && msg.role != "tool" && !msg.content.is_empty() {
+                    all_messages.push(msg);
+                }
+                chat_index += 1;
             }
+        }
+        
+        // 添加剩余的信息消息（如果有）
+        while info_index < sorted_info_messages.len() {
+            let (_, ref info_msg) = sorted_info_messages[info_index];
+            all_messages.push(info_msg.clone());
+            info_index += 1;
+        }
+        
+        // 为所有消息创建MessageBlock
+        for msg in all_messages {
             Self::add_block(app, MessageBlock::new(msg, app.width));
         }
         

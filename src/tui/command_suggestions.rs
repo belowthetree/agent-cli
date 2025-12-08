@@ -5,6 +5,8 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::tui::get_str_width;
+
 /// 命令提示组件
 /// 
 /// 负责显示和管理命令提示列表，支持翻页和选择
@@ -139,18 +141,28 @@ impl Widget for &CommandSuggestions {
             let prefix = format!("{:2}. ", i + 1);
             
             if is_selected {
+                let mut s = String::from(format!("{}> {}", prefix, cmd));
+                let width = get_str_width(&s);
+                for _ in width..area.width {
+                    s += " ";
+                }
                 // 选中的命令：黑底白字样式
                 let span = Span::styled(
-                    format!("{}> {}", prefix, cmd),
+                    s,
                     ratatui::style::Style::new()
                         .fg(ratatui::style::Color::White)
                         .bg(ratatui::style::Color::Black)
                 );
                 lines.push(Line::from(span));
             } else {
+                let mut s = format!("{}  {}", prefix, cmd);
+                let width = get_str_width(&s);
+                for _ in width..area.width {
+                    s += " ";
+                }
                 // 未选中的命令：黄色文本
                 let span = Span::styled(
-                    format!("{}  {}", prefix, cmd),
+                    s,
                     ratatui::style::Style::new().yellow()
                 );
                 lines.push(Line::from(span));
@@ -177,7 +189,7 @@ impl Widget for &CommandSuggestions {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
-            .style(ratatui::style::Style::new().light_blue());
+            .style(ratatui::style::Style::new().on_black().light_blue());
         
         let paragraph = ratatui::widgets::Paragraph::new(lines)
             .block(block);

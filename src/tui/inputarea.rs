@@ -47,6 +47,15 @@ impl InputArea {
         res
     }
 
+    // pub fn height(&self)->u16 {
+    //     let display_count = self.command_suggestions.display_count();
+    //     if display_count <= 0 {
+    //         self.max_height
+    //     } else {
+    //         let suggestions_height = display_count as u16 + 2; // +2 用于边框
+    //         self.max_height + suggestions_height
+    //     }
+    // }
     pub fn height(&self)->u16 {
         self.max_height
     }
@@ -144,6 +153,7 @@ impl Widget for &InputArea {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized {
+        let mut area = area;
         // 首先渲染命令提示列表（如果显示）
         if self.should_show_suggestions() {
             // 计算命令提示区域（在输入区域上方）
@@ -163,6 +173,7 @@ impl Widget for &InputArea {
                 // 渲染命令提示组件
                 let _ = &self.command_suggestions.render(suggestions_area, buf);
             }
+            area.height = area.height.saturating_sub(suggestions_height);
         }
         
         // 渲染输入区域

@@ -17,7 +17,8 @@ use crate::{
         messageblock::MessageBlock,
         renderer::Renderer,
         state_manager::StateManager,
-    }
+    },
+    model::param::ModelMessage,
 };
 
 /// 终端用户界面应用程序
@@ -36,6 +37,10 @@ pub struct App {
     pub window_height: u16,
     /// 消息块列表，用于渲染
     pub blocks: Vec<MessageBlock>,
+    /// 信息消息列表，用于显示指令、提示等信息
+    /// 每个元素是一个元组：(插入位置, 消息)
+    /// 插入位置表示该信息消息应该插入到聊天上下文中的哪个位置
+    pub info_messages: Vec<(usize, ModelMessage)>,
     /// 当前可用宽度（不包括滚动条）
     pub width: u16,
     /// 所有消息的总行数
@@ -82,6 +87,7 @@ impl App {
             input: InputArea::default(),
             window_height: 20,
             blocks: vec![],
+            info_messages: vec![],
             width: 20,
             max_line: 100,
             vertical_scroll_state: ScrollbarState::new(1),
@@ -190,9 +196,37 @@ impl App {
     /// 添加系统消息
     pub fn add_system_message(&mut self, message: &str) {
         use crate::model::param::ModelMessage;
-        let model_message = ModelMessage::system(message.to_string());
-        let block = MessageBlock::new(model_message, self.width);
-        self.blocks.push(block);
+        let mut model_message = ModelMessage::system(message.to_string());
+        model_message.role = "info".to_string(); // 使用特殊角色
+        
+        // 获取当前聊天上下文中的消息数量，作为插入位置
+        let insert_position = {
+            let chat = self.chat.lock().unwrap();
+            chat.context.len()
+        };
+        
+        // 添加到信息消息列表中，不添加到聊天上下文中
+        self.info_messages.push((insert_position, model_message));
+        self.refresh();
+    }
+    
+    /// 添加信息消息
+    /// 
+    /// 添加一个信息消息到信息消息列表中，用于显示指令、提示等信息。
+    /// 这些消息会显示在聊天消息之间。
+    pub fn add_info_message(&mut self, message: &str) {
+        use crate::model::param::ModelMessage;
+        let mut model_message = ModelMessage::system(message.to_string());
+        model_message.role = "info".to_string(); // 使用特殊角色
+        
+        // 获取当前聊天上下文中的消息数量，作为插入位置
+        let insert_position = {
+            let chat = self.chat.lock().unwrap();
+            chat.context.len()
+        };
+        
+        // 添加到信息消息列表中，不添加到聊天上下文中
+        self.info_messages.push((insert_position, model_message));
         self.refresh();
     }
 }

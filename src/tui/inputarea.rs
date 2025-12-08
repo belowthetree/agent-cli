@@ -1,18 +1,14 @@
 use std::char;
 use log::{debug, info};
-use ratatui::{widgets::{Block, Borders, Paragraph, Widget, Wrap}, style::Stylize, text::{Line, Span}};
-use crate::tui::get_char_width;
+use ratatui::{widgets::{Block, Borders, Paragraph, Widget, Wrap}, style::Stylize};
+use crate::tui::{get_char_width, command_suggestions::CommandSuggestions};
 
 #[derive(Clone)]
 pub struct InputArea {
     pub content: String,
     pub max_height: u16,
-    /// 命令提示列表
-    pub command_suggestions: Vec<String>,
-    /// 当前选中的命令提示索引
-    pub selected_suggestion: Option<usize>,
-    /// 是否显示命令提示
-    pub show_suggestions: bool,
+    /// 命令提示组件
+    pub command_suggestions: CommandSuggestions,
 }
 
 impl Default for InputArea {
@@ -20,9 +16,7 @@ impl Default for InputArea {
         Self {
             content: "".into(),
             max_height: 3,
-            command_suggestions: Vec::new(),
-            selected_suggestion: None,
-            show_suggestions: false,
+            command_suggestions: CommandSuggestions::new(),
         }
     }
 }
@@ -64,55 +58,34 @@ impl InputArea {
 
     /// 隐藏命令提示
     pub fn hide_suggestions(&mut self) {
-        self.show_suggestions = false;
-        self.selected_suggestion = None;
-        self.command_suggestions.clear();
+        self.command_suggestions.hide();
     }
 
     /// 更新命令提示
     pub fn update_suggestions(&mut self, commands: &[String], prefix: &str) {
-        self.command_suggestions = commands
-            .iter()
-            .filter(|cmd| cmd.starts_with(prefix))
-            .cloned()
-            .collect();
-        self.show_suggestions = !self.command_suggestions.is_empty();
-        if self.show_suggestions {
-            self.selected_suggestion = Some(0);
-        } else {
-            self.selected_suggestion = None;
-        }
+        self.command_suggestions.update_commands(commands, prefix);
     }
 
     /// 选择下一个命令提示
     pub fn next_suggestion(&mut self) {
-        if let Some(selected) = self.selected_suggestion {
-            if selected < self.command_suggestions.len() - 1 {
-                self.selected_suggestion = Some(selected + 1);
-            }
-        }
-        info!{"sugg {:?}", self.selected_suggestion};
+        self.command_suggestions.next();
+        info!{"sugg {:?}", self.command_suggestions.selected_index};
     }
 
     /// 选择上一个命令提示
     pub fn previous_suggestion(&mut self) {
-        if let Some(selected) = self.selected_suggestion {
-            if selected > 0 {
-                self.selected_suggestion = Some(selected - 1);
-            }
-        }
-        info!{"sugg {:?}", self.selected_suggestion};
+        self.command_suggestions.previous();
+        info!{"sugg {:?}", self.command_suggestions.selected_index};
     }
 
     /// 获取当前选中的命令
     pub fn get_selected_command(&self) -> Option<&String> {
-        self.selected_suggestion
-            .and_then(|idx| self.command_suggestions.get(idx))
+        self.command_suggestions.get_selected_command()
     }
 
     /// 检查是否应该显示命令提示
     pub fn should_show_suggestions(&self) -> bool {
-        self.show_suggestions && !self.command_suggestions.is_empty()
+        self.command_suggestions.visible && !self.command_suggestions.commands.is_empty()
     }
 
     pub fn get_content_width(&self)->u16 {
@@ -174,46 +147,22 @@ impl Widget for &InputArea {
         // 首先渲染命令提示列表（如果显示）
         if self.should_show_suggestions() {
             // 计算命令提示区域（在输入区域上方）
-            let suggestions_height = std::cmp::min(self.command_suggestions.len() as u16, 5); // 最多显示5个
-            let suggestions_area = ratatui::layout::Rect {
-                x: area.x,
-                y: area.y.saturating_sub(suggestions_height),
-                width: area.width,
-                height: suggestions_height,
-            };
+            // 命令提示的高度取决于要显示的命令数量
+            let display_count = self.command_suggestions.display_count();
+            let suggestions_height = display_count as u16 + 2; // +2 用于边框
             
-            // 创建命令提示文本行，每行一个命令
-            let mut lines: Vec<Line> = Vec::new();
-            for (i, cmd) in self.command_suggestions.iter().enumerate() {
-                let is_selected = self.selected_suggestion == Some(i);
-                if is_selected {
-                    // 选中的命令：黑底白字样式
-                    let span = Span::styled(
-                        format!("> {}", cmd),
-                        ratatui::style::Style::new()
-                            .fg(ratatui::style::Color::White)
-                            .bg(ratatui::style::Color::Black)
-                    );
-                    lines.push(Line::from(span));
-                } else {
-                    // 未选中的命令：黄色文本
-                    let span = Span::styled(
-                        format!("  {}", cmd),
-                        ratatui::style::Style::new().yellow()
-                    );
-                    lines.push(Line::from(span));
-                }
+            // 确保有足够的空间显示命令提示
+            if suggestions_height > 0 && area.y >= suggestions_height {
+                let suggestions_area = ratatui::layout::Rect {
+                    x: area.x,
+                    y: area.y.saturating_sub(suggestions_height),
+                    width: area.width,
+                    height: suggestions_height,
+                };
+                
+                // 渲染命令提示组件
+                let _ = &self.command_suggestions.render(suggestions_area, buf);
             }
-            
-            // 仿照MessageBlock样式创建显示框
-            let block = ratatui::widgets::Block::default()
-                .title("命令提示")
-                .borders(ratatui::widgets::Borders::ALL)
-                .style(ratatui::style::Style::new().light_blue());
-            
-            let list = ratatui::widgets::Paragraph::new(lines)
-                .block(block);
-            list.render(suggestions_area, buf);
         }
         
         // 渲染输入区域

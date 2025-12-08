@@ -8,6 +8,11 @@ mod appevent;
 mod appchat;
 mod renderer;
 mod state_manager;
+mod commands;
+mod command_suggestions;
+
+#[allow(unused_imports)]
+pub use commands::{TuiCommand, CommandRegistry, init_global_registry, global_registry};
 
 pub async fn run() {
     color_eyre::install().unwrap();

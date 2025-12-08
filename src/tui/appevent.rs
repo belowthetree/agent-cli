@@ -103,8 +103,15 @@ impl AppEvent {
             // 获取选中的命令并克隆它，以释放对app.input的借用
             let command = app.input.get_selected_command().cloned();
             if let Some(command) = command {
-                // 执行选中的命令
-                app.execute_command(&command);
+                // 在当前线程中同步执行异步命令
+                // 使用block_in_place来避免阻塞整个运行时
+                let future = app.execute_command(&command);
+                let handle = tokio::runtime::Handle::current();
+                
+                // 使用block_on在当前线程中执行异步命令
+                // 注意：这可能会阻塞当前线程，但命令执行应该很快
+                let _ = handle.block_on(future);
+                
                 // 清空输入并隐藏命令提示
                 app.input.clear();
                 app.input.hide_suggestions();

@@ -70,6 +70,11 @@ impl App {
         }
         let (scroll_tx, scroll_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
+        
+        // 初始化命令注册器并获取命令列表
+        let registry = crate::tui::init_global_registry();
+        let commands = registry.command_names();
+        
         Self {
             chat: Arc::new(Mutex::new(chat)),
             should_exit: Arc::new(AtomicBool::new(false)),
@@ -86,15 +91,7 @@ impl App {
             event_tx,
             dirty: true,
             cursor_offset: 0,
-            commands: vec![
-                "/help".to_string(),
-                "/clear".to_string(),
-                "/exit".to_string(),
-                "/reset".to_string(),
-                "/history".to_string(),
-                "/tools".to_string(),
-                "/config".to_string(),
-            ],
+            commands,
         }
     }
 
@@ -164,74 +161,34 @@ impl App {
     pub fn check_command_suggestions(&mut self) {
         let content = self.input.content.clone();
         if content.starts_with('/') {
-            let prefix = content.trim_start_matches('/');
-            self.input.update_suggestions(&self.commands, prefix);
+            self.input.update_suggestions(&self.commands, &content);
         } else {
             self.input.hide_suggestions();
         }
     }
 
     /// 执行命令
-    pub fn execute_command(&mut self, command: &str) -> bool {
-        match command {
-            "/help" => {
-                self.add_system_message("可用命令:\n  /help - 显示帮助信息\n  /clear - 清除聊天记录\n  /exit - 退出程序\n  /reset - 重置对话\n  /history - 显示历史记录\n  /tools - 显示可用工具\n  /config - 显示配置信息");
-                true
-            }
-            "/clear" => {
-                self.blocks.clear();
-                self.max_line = 0;
-                self.index = 0;
-                self.add_system_message("聊天记录已清除");
-                true
-            }
-            "/exit" => {
-                self.should_exit.store(true, std::sync::atomic::Ordering::Relaxed);
-                true
-            }
-            "/reset" => {
-                {
-                    let mut chat = self.chat.lock().unwrap();
-                    chat.reset_conversation_turn();
-                }
-                self.add_system_message("对话轮次已重置");
-                true
-            }
-            "/history" => {
-                let history = {
-                    let chat = self.chat.lock().unwrap();
-                    chat.context.iter()
-                        .filter(|msg| msg.role == "user" || msg.role == "assistant")
-                        .map(|msg| format!("[{}] {}", msg.role, msg.content))
-                        .collect::<Vec<String>>()
-                };
-                self.add_system_message(&format!("历史记录 ({} 条):\n{}", history.len(), history.join("\n")));
-                true
-            }
-            "/tools" => {
-                {
-                    let _chat = self.chat.lock().unwrap();
-                    // 由于tools字段是私有的，我们无法直接访问
-                    // 暂时显示一个通用消息
-                }
-                self.add_system_message("工具信息: 无法直接访问工具列表（私有字段）");
-                true
-            }
-            "/config" => {
-                {
-                    let _chat = self.chat.lock().unwrap();
-                    // 由于这些字段是私有的，我们无法直接访问
-                    // 暂时显示一个通用消息
-                }
-                self.add_system_message("配置信息: 无法直接访问配置字段（私有字段）");
-                true
-            }
-            _ => false,
+    pub async fn execute_command(&mut self, command: &str) -> bool {
+        // 移除开头的斜杠
+        let command = command.trim_start_matches('/');
+        
+        // 分割命令和参数
+        let parts: Vec<&str> = command.splitn(2, ' ').collect();
+        let cmd_name = parts[0];
+        let args = if parts.len() > 1 { parts[1] } else { "" };
+        
+        // 从注册器中查找命令
+        let registry = crate::tui::global_registry();
+        if let Some(cmd) = registry.find(cmd_name) {
+            // 执行命令
+            cmd.execute(self, args).await
+        } else {
+            false
         }
     }
 
     /// 添加系统消息
-    fn add_system_message(&mut self, message: &str) {
+    pub fn add_system_message(&mut self, message: &str) {
         use crate::model::param::ModelMessage;
         let model_message = ModelMessage::system(message.to_string());
         let block = MessageBlock::new(model_message, self.width);

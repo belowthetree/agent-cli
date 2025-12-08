@@ -4,6 +4,7 @@ use rmcp::{RoleClient, ServiceExt, service::RunningService};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{self, Write};
 
 // use crate::mcp_adaptor::McpManager;
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -130,8 +131,112 @@ pub struct Config {
 
 impl Config {
     pub fn local() -> Result<Self, Box<dyn std::error::Error>> {
-        let config_content = fs::read_to_string("config.json").expect("找不到 config.json 文件");
-        let config_file: Self = serde_json::from_str(&config_content)?;
+        // 检查配置文件是否存在
+        if !std::path::Path::new("config.json").exists() {
+            println!("配置文件不存在，正在创建默认配置文件...");
+            return Self::create_default_config();
+        }
+        
+        // 读取配置文件
+        let config_content = fs::read_to_string("config.json")?;
+        let mut config_file: Self = serde_json::from_str(&config_content)?;
+        
+        // 验证和补全配置字段
+        config_file = Self::validate_and_complete_config(config_file)?;
+        
         Ok(config_file)
+    }
+    
+    fn create_default_config() -> Result<Self, Box<dyn std::error::Error>> {
+        println!("=== 配置文件初始化 ===");
+        
+        // 获取必要的配置信息
+        let api_key = Self::prompt_user_input("请输入API密钥（必填）: ")?;
+        let url = Self::prompt_user_input_optional("请输入API URL（可选，按Enter跳过）: ")?;
+        let model = Self::prompt_user_input_optional("请输入模型名称（可选，按Enter跳过）: ")?;
+        
+        // 创建默认配置
+        let config = Config {
+            mcp: None,
+            api_key,
+            url: if url.is_empty() { None } else { Some(url) },
+            model: if model.is_empty() { None } else { Some(model) },
+            max_tool_try: max_tool_try_default(),
+            max_context_num: max_context_num_default(),
+            max_tokens: max_tokens_default(),
+            ask_before_tool_execution: ask_before_tool_execution_default(),
+            prompt: None,
+            envs: Vec::new(),
+        };
+        
+        // 保存配置文件
+        let config_json = serde_json::to_string_pretty(&config)?;
+        fs::write("config.json", config_json)?;
+        
+        println!("配置文件已创建: config.json");
+        Ok(config)
+    }
+    
+    fn validate_and_complete_config(mut config: Self) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut needs_save = false;
+        
+        // 验证必填字段
+        if config.api_key.is_empty() {
+            println!("API密钥缺失，需要重新输入");
+            config.api_key = Self::prompt_user_input("请输入API密钥: ")?;
+            needs_save = true;
+        }
+        
+        // 设置默认值
+        if config.max_tool_try == 0 {
+            config.max_tool_try = max_tool_try_default();
+            needs_save = true;
+        }
+        
+        if config.max_context_num == 0 {
+            config.max_context_num = max_context_num_default();
+            needs_save = true;
+        }
+        
+        if config.max_tokens.is_none() {
+            config.max_tokens = max_tokens_default();
+            needs_save = true;
+        }
+        
+        // 如果需要保存，更新配置文件
+        if needs_save {
+            let config_json = serde_json::to_string_pretty(&config)?;
+            fs::write("config.json", config_json)?;
+            println!("配置文件已更新");
+        }
+        
+        Ok(config)
+    }
+    
+    fn prompt_user_input(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
+        loop {
+            print!("{}", prompt);
+            io::stdout().flush()?;
+            
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            
+            let input = input.trim().to_string();
+            if !input.is_empty() {
+                return Ok(input);
+            }
+            
+            println!("输入不能为空，请重新输入");
+        }
+    }
+    
+    fn prompt_user_input_optional(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
+        print!("{}", prompt);
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        
+        Ok(input.trim().to_string())
     }
 }

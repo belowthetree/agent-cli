@@ -6,8 +6,5 @@ napcat.toml
 config.json
 *.log
 *.exe
-config_backup.json
-config_test_temp.json
+*.json
 运行Target.bat
-config_backup.json
-config_backup.json

@@ -10,6 +10,7 @@ mod renderer;
 mod state_manager;
 mod commands;
 mod command_suggestions;
+mod option_dialog;
 
 #[allow(unused_imports)]
 pub use commands::{TuiCommand, CommandRegistry, init_global_registry, global_registry};

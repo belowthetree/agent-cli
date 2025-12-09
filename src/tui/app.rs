@@ -15,6 +15,7 @@ use crate::{
         appevent::AppEvent,
         inputarea::InputArea,
         messageblock::MessageBlock,
+        option_dialog::OptionDialog,
         renderer::Renderer,
         state_manager::StateManager,
     },
@@ -61,6 +62,8 @@ pub struct App {
     pub cursor_offset: u16,
     /// 可用命令列表
     pub commands: Vec<String>,
+    /// 选项对话框
+    pub option_dialog: OptionDialog,
 }
 
 impl App {
@@ -98,6 +101,7 @@ impl App {
             dirty: true,
             cursor_offset: 0,
             commands,
+            option_dialog: OptionDialog::new(),
         }
     }
 
@@ -228,5 +232,17 @@ impl App {
         // 添加到信息消息列表中，不添加到聊天上下文中
         self.info_messages.push((insert_position, model_message));
         self.refresh();
+    }
+    
+    /// 显示选项对话框
+    /// 
+    /// 显示一个选项对话框供用户选择，用户可以使用上下键导航，回车键确认，ESC键取消。
+    /// 
+    /// # 参数
+    /// - `title`: 对话框标题
+    /// - `options`: 选项列表
+    #[allow(dead_code)]
+    pub fn show_option_dialog(&mut self, title: &str, options: Vec<String>) {
+        self.option_dialog.show(title, options);
     }
 }

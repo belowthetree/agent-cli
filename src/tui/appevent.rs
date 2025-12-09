@@ -37,6 +37,12 @@ impl AppEvent {
 
     /// 处理ESC键：取消运行或退出应用
     pub fn handle_escape_key(app: &mut App) {
+        // 如果选项对话框可见，优先取消选项对话框
+        if app.option_dialog.visible {
+            app.option_dialog.hide();
+            return;
+        }
+        
         let chat = app.chat.lock().unwrap();
         if chat.is_running() {
             chat.cancel();
@@ -49,8 +55,12 @@ impl AppEvent {
     pub fn handle_navigation_keys(app: &mut App, key_code: KeyCode) {
         match key_code {
             KeyCode::Down => {
-                // 如果显示命令提示，则选择下一个命令提示
-                if app.input.should_show_suggestions() {
+                // 如果显示选项对话框，则选择下一个选项
+                if app.option_dialog.visible {
+                    app.option_dialog.next();
+                }
+                // 否则如果显示命令提示，则选择下一个命令提示
+                else if app.input.should_show_suggestions() {
                     app.input.next_suggestion();
                 } else {
                     if app.max_line > app.window_height {
@@ -61,8 +71,12 @@ impl AppEvent {
                 }
             }
             KeyCode::Up => {
-                // 如果显示命令提示，则选择上一个命令提示
-                if app.input.should_show_suggestions() {
+                // 如果显示选项对话框，则选择上一个选项
+                if app.option_dialog.visible {
+                    app.option_dialog.previous();
+                }
+                // 否则如果显示命令提示，则选择上一个命令提示
+                else if app.input.should_show_suggestions() {
                     app.input.previous_suggestion();
                 } else if app.index > 0 {
                     app.index = app.index.saturating_sub(1);
@@ -98,7 +112,32 @@ impl AppEvent {
 
     /// 处理回车键：发送消息给模型或执行命令
     pub fn handle_enter_key(app: &mut App) {
-        // 首先检查是否显示命令提示
+        // 首先检查是否显示选项对话框
+        if app.option_dialog.visible {
+            // 先获取需要的数据，避免同时借用
+            let selected_option = app.option_dialog.get_selected_option().cloned();
+            let selected_index = app.option_dialog.get_selected_index().unwrap_or(0);
+            let _title = app.option_dialog.title.clone();
+            
+            // 隐藏选项对话框
+            app.option_dialog.hide();
+            
+            // 如果有选中的选项，显示系统消息
+            if let Some(selected_option) = selected_option {
+                // 添加系统消息显示用户的选择
+                app.add_system_message(&format!(
+                    "已选择: {} (选项 {})",
+                    selected_option,
+                    selected_index + 1
+                ));
+                
+                // 这里可以添加回调机制来处理选项选择
+                // 例如：app.handle_option_selection(&title, selected_index, &selected_option);
+            }
+            return;
+        }
+        
+        // 然后检查是否显示命令提示
         if app.input.should_show_suggestions() {
             // 获取选中的命令并克隆它，以释放对app.input的借用
             let command = app.input.get_selected_command().cloned();

@@ -94,5 +94,10 @@ impl Renderer {
         );
         // 最后渲染输入
         frame.render_widget(&app.input, input_area);
+        
+        // 渲染选项对话框（如果可见）
+        if app.option_dialog.visible {
+            frame.render_widget(&app.option_dialog, frame.area());
+        }
     }
 }

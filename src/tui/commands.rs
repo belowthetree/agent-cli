@@ -80,7 +80,6 @@ pub fn init_global_registry() -> &'static CommandRegistry {
         registry.register(Box::new(HistoryCommand));
         registry.register(Box::new(ToolsCommand));
         registry.register(Box::new(ConfigCommand));
-        registry.register(Box::new(TestDialogCommand));
         
         registry
     })
@@ -255,40 +254,6 @@ impl TuiCommand for ConfigCommand {
         // 由于这些字段是私有的，我们无法直接访问
         // 暂时显示一个通用消息
         app.add_system_message("配置信息: 无法直接访问配置字段（私有字段）");
-        true
-    }
-}
-
-/// 测试对话框命令
-#[derive(Debug)]
-pub struct TestDialogCommand;
-
-#[async_trait]
-impl TuiCommand for TestDialogCommand {
-    fn name(&self) -> &'static str {
-        "test-dialog"
-    }
-    
-    fn description(&self) -> &'static str {
-        "测试选项对话框功能"
-    }
-    
-    async fn execute(&self, app: &mut crate::tui::app::App, _args: &str) -> bool {
-        // 创建一些测试选项
-        let options = vec![
-            "选项 1: 确认操作".to_string(),
-            "选项 2: 取消操作".to_string(),
-            "选项 3: 保存设置".to_string(),
-            "选项 4: 加载配置".to_string(),
-            "选项 5: 退出程序".to_string(),
-        ];
-        
-        // 显示选项对话框
-        app.show_option_dialog("请选择一个操作:", options);
-        
-        // 添加一条信息消息，告诉用户如何使用对话框
-        app.add_info_message("选项对话框已显示！使用 ↑/↓ 键导航，Enter 键确认，ESC 键取消。");
-        
         true
     }
 }

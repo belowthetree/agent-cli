@@ -7,9 +7,9 @@
 [中文版本](../README.md).
 
 ## Examples
-![](docs/agentcli.gif)
+![](agentcli.gif)
 
-![](docs/tui.gif)
+![](tui.png)
 
 ## Features
 
@@ -19,6 +19,16 @@
 - ✨ Built with Rust, high performance and reliable
 - ✨ Supports command-line interactive interface
 - ✨ Acts as a server to connect with NapCat and respond to QQ @ messages
+
+## 🔧 Internal Tools
+
+The Agent CLI includes the following built-in internal tools that can be used directly in chats:
+
+| Tool Name | Description | Main Functions |
+|-----------|-------------|----------------|
+| `filesystem` | File system operations tool | Read, write, list files and directories. By default, it can only operate on files within the current working directory. |
+| `get_best_tool` | Get best tool recommendation | Analyze user requirements and recommend the most suitable available tools. |
+| `choose_tool` | Tool selector | Inform the system and users about the most appropriate tool to use (typically called internally by `get_best_tool`). |
 
 ## 📦 Installation Guide
 
@@ -70,6 +80,7 @@ cargo build
 ```bash
 cargo test
 ```
+or double click file “运行Target.bat”
 
 ### Log Settings
 Set log level and output in `log4rs.yaml`

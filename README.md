@@ -68,11 +68,11 @@ agent-cli -p "您的问题或指令"
 * --stream 是否流式，默认为 true
 * --use_tool 是否使用工具，默认为 true
 * --wait 等待模式，默认为 false。当为 true 时，程序会在循环中处理标准输入，每次对话不保存上下文
-* --remote 启动远程TCP服务器，指定监听地址（如 `127.0.0.1:8080`）
+* --remote 启动远程WebSocket服务器，指定监听地址（如 `127.0.0.1:8080`）
 
 ## 🌐 Remote 模块 - 外部对接指南
 
-Agent CLI 提供了 Remote 模块，允许外部应用程序通过 TCP 协议与 AI 模型进行交互。该模块支持多种输入类型和配置选项，方便集成到其他系统中。
+Agent CLI 提供了 Remote 模块，允许外部应用程序通过 WebSocket 协议与 AI 模型进行交互。该模块支持多种输入类型和配置选项，方便集成到其他系统中。
 
 ### 快速开始
 
@@ -83,24 +83,24 @@ Agent CLI 提供了 Remote 模块，允许外部应用程序通过 TCP 协议与
 
 2. **客户端连接示例**（Python）：
    ```python
-   import socket
+   import asyncio
+   import websockets
    import json
 
-   def send_request(request_data):
-       with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-           s.connect(('127.0.0.1', 8080))
-           request_json = json.dumps(request_data) + '\n'
-           s.sendall(request_json.encode('utf-8'))
-           response = s.recv(4096).decode('utf-8')
-           return json.loads(response)
+   async def send_request(request_data):
+       async with websockets.connect('ws://127.0.0.1:8080') as websocket:
+           request_json = json.dumps(request_data)
+           await websocket.send(request_json)
+           response_data = await websocket.recv()
+           return json.loads(response_data)
 
    # 发送请求
-   response = send_request({
+   response = asyncio.run(send_request({
        "request_id": "test_001",
        "input": {"Text": "你好"},
        "stream": False,
        "use_tools": True
-   })
+   }))
    print(response)
    ```
 

@@ -66,11 +66,11 @@ Configuration file is located at `config.json`, specific configuration reference
 * --stream Whether to use streaming, defaults to true
 * --use_tool Whether to use tools, defaults to true
 * --wait Wait mode, defaults to false. When true, the program processes standard input in a loop, with no context preservation between conversations
-* --remote Start remote TCP server, specify listening address (e.g., `127.0.0.1:8080`)
+* --remote Start remote WebSocket server, specify listening address (e.g., `127.0.0.1:8080`)
 
 ## 🌐 Remote Module - External Integration Guide
 
-The Agent CLI provides a Remote module that allows external applications to interact with the AI model through TCP protocol. This module supports multiple input types and configuration options, making it easy to integrate into other systems.
+The Agent CLI provides a Remote module that allows external applications to interact with the AI model through WebSocket protocol. This module supports multiple input types and configuration options, making it easy to integrate into other systems.
 
 ### Quick Start
 
@@ -81,24 +81,24 @@ The Agent CLI provides a Remote module that allows external applications to inte
 
 2. **Client Connection Example** (Python):
    ```python
-   import socket
+   import asyncio
+   import websockets
    import json
 
-   def send_request(request_data):
-       with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-           s.connect(('127.0.0.1', 8080))
-           request_json = json.dumps(request_data) + '\n'
-           s.sendall(request_json.encode('utf-8'))
-           response = s.recv(4096).decode('utf-8')
-           return json.loads(response)
+   async def send_request(request_data):
+       async with websockets.connect('ws://127.0.0.1:8080') as websocket:
+           request_json = json.dumps(request_data)
+           await websocket.send(request_json)
+           response_data = await websocket.recv()
+           return json.loads(response_data)
 
    # Send request
-   response = send_request({
+   response = asyncio.run(send_request({
        "request_id": "test_001",
        "input": {"Text": "Hello"},
        "stream": False,
        "use_tools": True
-   })
+   }))
    print(response)
    ```
 

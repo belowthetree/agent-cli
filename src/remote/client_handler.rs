@@ -3,7 +3,9 @@
 use crate::chat::Chat;
 use crate::config::Config;
 use crate::mcp;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use futures::{SinkExt, StreamExt};
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 use tokio::net::TcpStream;
 use log::{info, error};
 
@@ -11,66 +13,100 @@ use super::protocol::{RemoteRequest, RemoteResponse};
 
 /// 用于处理单个客户端连接的处理器。
 pub struct ClientHandler {
-    stream: TcpStream,
+    ws_stream: WebSocketStream<TcpStream>,
     config: Config,
 }
 
 impl ClientHandler {
     /// 创建一个新的客户端处理器。
-    pub fn new(stream: TcpStream, config: Config) -> Self {
-        Self { stream, config }
+    pub fn new(ws_stream: WebSocketStream<TcpStream>, config: Config) -> Self {
+        Self { ws_stream, config }
     }
 
     /// 处理客户端连接。
     pub async fn handle(&mut self) -> anyhow::Result<()> {
-        info!("New client connected: {:?}", self.stream.peer_addr());
+        info!("New WebSocket client connected");
         
-        let (reader, mut writer) = self.stream.split();
-        let mut reader = BufReader::new(reader);
-        let mut buffer = String::new();
-
         loop {
-            buffer.clear();
-            
-            // Read a line from the client
-            match reader.read_line(&mut buffer).await {
-                Ok(0) => {
-                    info!("Client disconnected");
+            match self.ws_stream.next().await {
+                Some(Ok(message)) => {
+                    match message {
+                        Message::Text(text) => {
+                            info!("Received WebSocket message: {}", text);
+                            
+                            // Parse the request
+                            let request: RemoteRequest = match serde_json::from_str(&text) {
+                                Ok(req) => req,
+                                Err(e) => {
+                                    error!("Failed to parse request: {} {}", e, text);
+                                    let error_response = RemoteResponse::error("parse_error", &format!("Invalid request format: {}", e));
+                                    let error_json = serde_json::to_string(&error_response)?;
+                                    self.ws_stream.send(Message::Text(error_json)).await?;
+                                    continue;
+                                }
+                            };
+
+                            // Process the request
+                            let config_clone = self.config.clone();
+                            let response = ClientHandler::process_request_internal(request, &config_clone).await;
+                            
+                            // Send the response
+                            let response_json = serde_json::to_string(&response)?;
+                            self.ws_stream.send(Message::Text(response_json)).await?;
+                        }
+                        Message::Binary(data) => {
+                            info!("Received binary message ({} bytes)", data.len());
+                            // Try to parse as JSON string
+                            if let Ok(text) = String::from_utf8(data) {
+                                match serde_json::from_str::<RemoteRequest>(&text) {
+                                    Ok(request) => {
+                                        let config_clone = self.config.clone();
+                                        let response = ClientHandler::process_request_internal(request, &config_clone).await;
+                                        let response_json = serde_json::to_string(&response)?;
+                                        self.ws_stream.send(Message::Text(response_json)).await?;
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to parse binary message as JSON: {}", e);
+                                        let error_response = RemoteResponse::error("parse_error", &format!("Invalid request format: {}", e));
+                                        let error_json = serde_json::to_string(&error_response)?;
+                                        self.ws_stream.send(Message::Text(error_json)).await?;
+                                    }
+                                }
+                            } else {
+                                error!("Binary message is not valid UTF-8");
+                                let error_response = RemoteResponse::error("parse_error", "Binary message must be valid UTF-8 JSON");
+                                let error_json = serde_json::to_string(&error_response)?;
+                                self.ws_stream.send(Message::Text(error_json)).await?;
+                            }
+                        }
+                        Message::Ping(data) => {
+                            info!("Received ping, sending pong");
+                            self.ws_stream.send(Message::Pong(data)).await?;
+                        }
+                        Message::Pong(_) => {
+                            // Ignore pong messages
+                        }
+                        Message::Close(frame) => {
+                            info!("Received close frame: {:?}", frame);
+                            if let Some(frame) = frame {
+                                self.ws_stream.send(Message::Close(Some(frame))).await?;
+                            } else {
+                                self.ws_stream.send(Message::Close(None)).await?;
+                            }
+                            break;
+                        }
+                        Message::Frame(_) => {
+                            // Raw frame, we don't handle this directly
+                            // It's handled internally by tungstenite
+                        }
+                    }
+                }
+                Some(Err(e)) => {
+                    error!("WebSocket error: {}", e);
                     break;
                 }
-                Ok(_) => {
-                    let request_str = buffer.trim();
-                    if request_str.is_empty() {
-                        continue;
-                    }
-
-                    info!("Received request: {}", request_str);
-                    
-                    // Parse the request
-                    let request: RemoteRequest = match serde_json::from_str(request_str) {
-                        Ok(req) => req,
-                        Err(e) => {
-                            error!("Failed to parse request: {}", e);
-                            let error_response = RemoteResponse::error("parse_error", &format!("Invalid request format: {}", e));
-                            let error_json = serde_json::to_string(&error_response)?;
-                            writer.write_all(error_json.as_bytes()).await?;
-                            writer.write_all(b"\n").await?;
-                            continue;
-                        }
-                    };
-
-                    // Process the request (pass config and request separately to avoid borrowing issues)
-                    let config_clone = self.config.clone();
-                    let response = ClientHandler::process_request_internal(request, &config_clone).await;
-                    
-                    // Send the response
-                    let response_json = serde_json::to_string(&response)?;
-                    writer.write_all(response_json.as_bytes()).await?;
-                    writer.write_all(b"\n").await?;
-                    writer.flush().await?;
-                }
-                Err(e) => {
-                    error!("Error reading from client: {}", e);
+                None => {
+                    info!("WebSocket connection closed by client");
                     break;
                 }
             }

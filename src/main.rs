@@ -28,7 +28,7 @@ struct Args {
     /// 是否等待用户输入（默认不等待）
     #[arg(short, long, default_value = "false")]
     wait: Option<bool>,
-    /// 启动远程TCP服务器
+    /// 启动远程WebSocket服务器
     #[arg(long)]
     remote: Option<String>,
     #[cfg(feature = "napcat")]

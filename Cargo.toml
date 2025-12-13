@@ -1,6 +1,6 @@
 [package]
 name = "agent-cli"
-version = "0.7.3"
+version = "0.8.0"
 edition = "2024"
 
 [features]
@@ -37,3 +37,5 @@ color-eyre = "0.6.5"
 unicode-width = "0.2.0"
 onebot_v11 = {version = "0.1.5", optional = true}
 chrono = "0.4.38"
+tokio-tungstenite = "0.21"
+tungstenite = "0.21"

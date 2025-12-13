@@ -2,7 +2,7 @@
 
 ## 概述
 
-Agent CLI 的 Remote 模块提供了一个 TCP 服务器，允许外部客户端通过 JSON 协议与 AI 模型进行交互。该协议支持多种输入类型（文本、图像、指令、文件等）和配置选项。
+Agent CLI 的 Remote 模块提供了一个 WebSocket 服务器，允许外部客户端通过 JSON 协议与 AI 模型进行交互。该协议支持多种输入类型（文本、图像、指令、文件等）和配置选项。
 
 ## 快速开始
 
@@ -12,22 +12,21 @@ Agent CLI 的 Remote 模块提供了一个 TCP 服务器，允许外部客户端
 agent-cli --remote 127.0.0.1:8080
 ```
 
-### 客户端连接示例
+### 客户端连接示例 (Python)
 
 ```python
-import socket
+import asyncio
+import websockets
 import json
 
-def send_request(host='127.0.0.1', port=8080, request_data):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((host, port))
-        
+async def send_request(uri='ws://127.0.0.1:8080', request_data):
+    async with websockets.connect(uri) as websocket:
         # 发送请求
-        request_json = json.dumps(request_data) + '\n'
-        s.sendall(request_json.encode('utf-8'))
+        request_json = json.dumps(request_data)
+        await websocket.send(request_json)
         
         # 接收响应
-        response_data = s.recv(4096).decode('utf-8')
+        response_data = await websocket.recv()
         return json.loads(response_data)
 
 # 示例请求
@@ -40,7 +39,8 @@ request = {
     "use_tools": true
 }
 
-response = send_request('127.0.0.1', 8080, request)
+# 运行异步函数
+response = asyncio.run(send_request('ws://127.0.0.1:8080', request))
 print(response)
 ```
 
@@ -48,7 +48,7 @@ print(response)
 
 ### 消息格式
 
-所有消息都使用 JSON 格式，以换行符 (`\n`) 分隔。
+所有消息都使用 JSON 格式，通过 WebSocket 的 Text 消息类型传输。
 
 ### 请求结构 (RemoteRequest)
 
@@ -322,80 +322,72 @@ print(response)
 ### Python 客户端
 
 ```python
-import socket
+import asyncio
+import websockets
 import json
-import threading
 
 class AgentCLIClient:
-    def __init__(self, host='127.0.0.1', port=8080):
-        self.host = host
-        self.port = port
-        self.socket = None
+    def __init__(self, uri='ws://127.0.0.1:8080'):
+        self.uri = uri
+        self.websocket = None
         
-    def connect(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((self.host, self.port))
+    async def connect(self):
+        self.websocket = await websockets.connect(self.uri)
         
-    def send_request(self, request_data):
-        if not self.socket:
-            self.connect()
+    async def send_request(self, request_data):
+        if not self.websocket:
+            await self.connect()
             
-        request_json = json.dumps(request_data) + '\n'
-        self.socket.sendall(request_json.encode('utf-8'))
+        request_json = json.dumps(request_data)
+        await self.websocket.send(request_json)
         
         # 接收响应
-        response_data = b''
-        while True:
-            chunk = self.socket.recv(4096)
-            if not chunk:
-                break
-            response_data += chunk
-            if b'\n' in chunk:
-                break
-                
-        return json.loads(response_data.decode('utf-8').strip())
+        response_data = await self.websocket.recv()
+        return json.loads(response_data)
     
-    def close(self):
-        if self.socket:
-            self.socket.close()
-            self.socket = None
+    async def close(self):
+        if self.websocket:
+            await self.websocket.close()
+            self.websocket = None
 
 # 使用示例
-client = AgentCLIClient('127.0.0.1', 8080)
-try:
-    response = client.send_request({
-        "request_id": "test_001",
-        "input": {"Text": "你好"},
-        "stream": False,
-        "use_tools": True
-    })
-    print(response)
-finally:
-    client.close()
+async def main():
+    client = AgentCLIClient('ws://127.0.0.1:8080')
+    try:
+        response = await client.send_request({
+            "request_id": "test_001",
+            "input": {"Text": "你好"},
+            "stream": False,
+            "use_tools": True
+        })
+        print(response)
+    finally:
+        await client.close()
+
+# 运行异步函数
+asyncio.run(main())
 ```
 
 ### JavaScript/Node.js 客户端
 
 ```javascript
-const net = require('net');
+const WebSocket = require('ws');
 
 class AgentCLIClient {
-    constructor(host = '127.0.0.1', port = 8080) {
-        this.host = host;
-        this.port = port;
-        this.client = null;
+    constructor(uri = 'ws://127.0.0.1:8080') {
+        this.uri = uri;
+        this.ws = null;
     }
 
     connect() {
         return new Promise((resolve, reject) => {
-            this.client = net.createConnection({
-                host: this.host,
-                port: this.port
-            }, () => {
+            this.ws = new WebSocket(this.uri);
+            
+            this.ws.on('open', () => {
                 resolve();
             });
 
-            this.client.on('error', (err) => {
+            this.ws.on('error', (err) => {
                 reject(err);
             });
         });
@@ -403,44 +395,40 @@ class AgentCLIClient {
 
     sendRequest(requestData) {
         return new Promise((resolve, reject) => {
-            if (!this.client) {
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
                 reject(new Error('Not connected'));
                 return;
             }
 
-            const requestJson = JSON.stringify(requestData) + '\n';
-            this.client.write(requestJson);
+            const requestJson = JSON.stringify(requestData);
+            this.ws.send(requestJson);
 
-            let responseData = '';
-            this.client.on('data', (data) => {
-                responseData += data.toString();
-                if (responseData.includes('\n')) {
-                    try {
-                        const response = JSON.parse(responseData.trim());
-                        resolve(response);
-                    } catch (err) {
-                        reject(err);
-                    }
+            this.ws.once('message', (data) => {
+                try {
+                    const response = JSON.parse(data.toString());
+                    resolve(response);
+                } catch (err) {
+                    reject(err);
                 }
             });
 
-            this.client.on('error', (err) => {
+            this.ws.once('error', (err) => {
                 reject(err);
             });
         });
     }
 
     close() {
-        if (this.client) {
-            this.client.end();
-            this.client = null;
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
         }
     }
 }
 
 // 使用示例
 async function main() {
-    const client = new AgentCLIClient('127.0.0.1', 8080);
+    const client = new AgentCLIClient('ws://127.0.0.1:8080');
     try {
         await client.connect();
         const response = await client.sendRequest({
@@ -462,11 +450,12 @@ main();
 
 ## 性能建议
 
-1. **连接复用**: 对于多个请求，复用TCP连接而不是为每个请求创建新连接
-2. **批量处理**: 对于大量小请求，考虑批量处理
-3. **超时设置**: 客户端应设置合理的超时时间
-4. **错误重试**: 实现适当的错误重试机制
-5. **资源清理**: 确保及时关闭连接释放资源
+1. **连接复用**: WebSocket 连接是持久化的，可以复用同一个连接处理多个请求
+2. **心跳机制**: 实现 WebSocket ping/pong 心跳机制保持连接活跃
+3. **批量处理**: 对于大量小请求，考虑批量处理
+4. **超时设置**: 客户端应设置合理的连接和消息超时时间
+5. **错误重试**: 实现适当的错误重试和连接重连机制
+6. **资源清理**: 确保及时关闭连接释放资源
 
 ## 安全考虑
 
@@ -480,6 +469,7 @@ main();
 - v1.0.0 (初始版本): 支持基本文本对话和工具调用
 - v1.1.0: 添加流式响应支持
 - v1.2.0: 添加多种输入类型支持（图像、文件、指令等）
+- v1.3.0: 协议从 TCP 迁移到 WebSocket，提供更好的双向通信支持
 
 ## 支持与反馈
 

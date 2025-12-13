@@ -66,6 +66,70 @@ Configuration file is located at `config.json`, specific configuration reference
 * --stream Whether to use streaming, defaults to true
 * --use_tool Whether to use tools, defaults to true
 * --wait Wait mode, defaults to false. When true, the program processes standard input in a loop, with no context preservation between conversations
+* --remote Start remote TCP server, specify listening address (e.g., `127.0.0.1:8080`)
+
+## 🌐 Remote Module - External Integration Guide
+
+The Agent CLI provides a Remote module that allows external applications to interact with the AI model through TCP protocol. This module supports multiple input types and configuration options, making it easy to integrate into other systems.
+
+### Quick Start
+
+1. **Start Remote Server**:
+   ```bash
+   agent-cli --remote 127.0.0.1:8080
+   ```
+
+2. **Client Connection Example** (Python):
+   ```python
+   import socket
+   import json
+
+   def send_request(request_data):
+       with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+           s.connect(('127.0.0.1', 8080))
+           request_json = json.dumps(request_data) + '\n'
+           s.sendall(request_json.encode('utf-8'))
+           response = s.recv(4096).decode('utf-8')
+           return json.loads(response)
+
+   # Send request
+   response = send_request({
+       "request_id": "test_001",
+       "input": {"Text": "Hello"},
+       "stream": False,
+       "use_tools": True
+   })
+   print(response)
+   ```
+
+### Detailed Protocol Documentation
+
+Complete communication protocol documentation: [remote_protocol.md](remote_protocol.md)
+
+Documentation includes:
+- Complete protocol specifications
+- All message format definitions
+- Multiple input type support (text, images, files, instructions, etc.)
+- Configuration options explanation
+- Usage examples
+- Client implementation guides (Python, JavaScript, etc.)
+- Error handling and performance recommendations
+
+### Main Features
+
+- **Multiple Input Types**: Supports text, images (base64), files, structured instructions
+- **Streaming Responses**: Supports real-time streaming output
+- **Tool Calling**: Configurable MCP tool usage
+- **Configuration Overrides**: Supports request-level custom configuration
+- **Token Statistics**: Returns detailed token usage information
+
+### Integration Scenarios
+
+- **Web Application Backend**: As an AI service provider
+- **Desktop Applications**: Integrate AI functionality
+- **Automation Scripts**: Batch processing tasks
+- **Monitoring Systems**: Intelligent alert analysis
+- **Educational Tools**: Intelligent tutoring systems
 
 ## 👨‍💻 Development Guide
 

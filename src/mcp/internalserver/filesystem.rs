@@ -26,6 +26,7 @@ impl FileSystemTool {
             return true;
         }
         
+        // 首先尝试规范化路径
         match path.canonicalize() {
             Ok(canonical_path) => {
                 // 规范化当前目录进行比较
@@ -40,9 +41,54 @@ impl FileSystemTool {
                 }
             }
             Err(_) => {
-                // 如果无法规范化路径，检查相对路径是否在当前目录下
-                let relative_path = current_dir.join(path);
-                relative_path.exists()
+                // 如果无法规范化路径（例如文件不存在），检查路径是否相对且不包含父目录逃逸
+                if path.is_relative() {
+                    // 检查路径是否尝试逃逸当前目录
+                    let mut depth = 0;
+                    for component in path.components() {
+                        match component {
+                            std::path::Component::ParentDir => {
+                                if depth == 0 {
+                                    // 尝试访问当前目录的父目录，不允许
+                                    return false;
+                                }
+                                depth -= 1;
+                            }
+                            std::path::Component::Normal(_) => {
+                                depth += 1;
+                            }
+                            std::path::Component::CurDir => {
+                                // 当前目录，深度不变
+                            }
+                            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                                // 绝对路径或Windows前缀，不应该出现在相对路径中
+                                // 但为了安全，返回false
+                                return false;
+                            }
+                        }
+                    }
+                    // 相对路径且不逃逸当前目录，允许
+                    true
+                } else {
+                    // 绝对路径但无法规范化，需要进一步检查
+                    // 尝试检查路径是否以当前目录开头
+                    let absolute_path = current_dir.join(path);
+                    // 检查规范化后的绝对路径是否在当前目录下
+                    match absolute_path.canonicalize() {
+                        Ok(canonical_absolute) => {
+                            match current_dir.canonicalize() {
+                                Ok(canonical_current) => {
+                                    canonical_absolute.starts_with(&canonical_current)
+                                }
+                                Err(_) => canonical_absolute.starts_with(&current_dir),
+                            }
+                        }
+                        Err(_) => {
+                            // 如果仍然无法规范化，检查原始路径是否以当前目录开头
+                            absolute_path.starts_with(&current_dir)
+                        }
+                    }
+                }
             }
         }
     }

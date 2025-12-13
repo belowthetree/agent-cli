@@ -68,6 +68,70 @@ agent-cli -p "您的问题或指令"
 * --stream 是否流式，默认为 true
 * --use_tool 是否使用工具，默认为 true
 * --wait 等待模式，默认为 false。当为 true 时，程序会在循环中处理标准输入，每次对话不保存上下文
+* --remote 启动远程TCP服务器，指定监听地址（如 `127.0.0.1:8080`）
+
+## 🌐 Remote 模块 - 外部对接指南
+
+Agent CLI 提供了 Remote 模块，允许外部应用程序通过 TCP 协议与 AI 模型进行交互。该模块支持多种输入类型和配置选项，方便集成到其他系统中。
+
+### 快速开始
+
+1. **启动远程服务器**：
+   ```bash
+   agent-cli --remote 127.0.0.1:8080
+   ```
+
+2. **客户端连接示例**（Python）：
+   ```python
+   import socket
+   import json
+
+   def send_request(request_data):
+       with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+           s.connect(('127.0.0.1', 8080))
+           request_json = json.dumps(request_data) + '\n'
+           s.sendall(request_json.encode('utf-8'))
+           response = s.recv(4096).decode('utf-8')
+           return json.loads(response)
+
+   # 发送请求
+   response = send_request({
+       "request_id": "test_001",
+       "input": {"Text": "你好"},
+       "stream": False,
+       "use_tools": True
+   })
+   print(response)
+   ```
+
+### 详细协议文档
+
+完整的通讯协议文档请参考：[docs/remote_protocol.md](docs/remote_protocol.md)
+
+文档内容包括：
+- 完整的协议规范
+- 所有消息格式定义
+- 多种输入类型支持（文本、图像、文件、指令等）
+- 配置选项说明
+- 使用示例
+- 客户端实现指南（Python、JavaScript等）
+- 错误处理和性能建议
+
+### 主要特性
+
+- **多种输入类型**：支持文本、图像（base64）、文件、结构化指令
+- **流式响应**：支持实时流式输出
+- **工具调用**：可配置是否使用MCP工具
+- **配置覆盖**：支持请求级别的配置自定义
+- **Token统计**：返回详细的token使用情况
+
+### 集成场景
+
+- **Web应用后端**：作为AI服务提供者
+- **桌面应用**：集成AI功能
+- **自动化脚本**：批量处理任务
+- **监控系统**：智能告警分析
+- **教育工具**：智能辅导系统
 
 ## 👨‍💻 开发指南
 

@@ -1,5 +1,6 @@
 use crate::client::handle_output;
 use clap::{Parser, command};
+use log::info;
 mod chat;
 mod client;
 mod config;
@@ -10,6 +11,7 @@ mod model;
 mod napcat;
 mod prompt;
 mod tui;
+mod remote;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -26,6 +28,9 @@ struct Args {
     /// 是否等待用户输入（默认不等待）
     #[arg(short, long, default_value = "false")]
     wait: Option<bool>,
+    /// 启动远程TCP服务器
+    #[arg(long)]
+    remote: Option<String>,
     #[cfg(feature = "napcat")]
     #[arg(short, long, default_value_t = false)]
     napcat: bool,
@@ -42,6 +47,14 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     let args = Args::parse();
+    
+    // 优先处理 remote 模式
+    if let Some(addr) = args.remote {
+        info!("Starting remote server on {}", addr);
+        remote::start_server(&addr).await?;
+        return Ok(());
+    }
+    
     // 优先处理 napcat
     #[cfg(feature = "napcat")]
     if args.napcat {

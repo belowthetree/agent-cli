@@ -33,7 +33,7 @@ pub enum McpServerTransportConfig {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct McpConfig {
     pub server: HashMap<String, McpServerConfig>,
 }
@@ -103,13 +103,13 @@ fn ask_before_tool_execution_default() -> bool {
     false
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct EnvConfig {
     pub key: String,
     pub value: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     #[serde(default)]
     pub mcp: Option<McpConfig>,

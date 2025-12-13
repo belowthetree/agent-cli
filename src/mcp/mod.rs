@@ -17,23 +17,23 @@ pub async fn init() {
     let config = config::Config::local().unwrap();
     if config.mcp.is_none() {
         warn!("没有 mcp");
-        return;
     }
-    let mcp = config.mcp.unwrap();
     let mgr = mcp_manager::McpManager::global();
-    info!("{:?}", mcp);
-    for server in mcp.server.iter() {
-        info!("{:?}", server);
-        let e = mgr
-            .add_tool_service(server.0.clone(), server.1.transport.clone())
-            .await;
-        if e.is_err() {
-            log::error!("{:?}", e);
+    if let Some(mcp) = config.mcp {
+        info!("{:?}", mcp);
+        for server in mcp.server.iter() {
+            info!("{:?}", server);
+            let e = mgr
+                .add_tool_service(server.0.clone(), server.1.transport.clone())
+                .await;
+            if e.is_err() {
+                log::error!("{:?}", e);
+            }
         }
-    }
-    let tools = get_config_tools();
-    for tool in tools.iter() {
-        info!("{}", tool.name());
+        let tools = get_config_tools();
+        for tool in tools.iter() {
+            info!("{}", tool.name());
+        }
     }
     let _ = mgr.add_internal_tool(Arc::new(FileSystemTool));
 }
@@ -41,7 +41,6 @@ pub async fn init() {
 #[allow(unused)]
 pub fn get_basic_tools() -> Vec<McpTool> {
     vec![
-        McpTool::new(GetBestTool.get_mcp_tool(), "".into(), false),
         McpTool::new(FileSystemTool.get_mcp_tool(), "".into(), false),
     ]
 }

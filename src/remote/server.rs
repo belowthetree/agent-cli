@@ -66,15 +66,4 @@ impl RemoteServer {
         let mut handler = ClientHandler::new(ws_stream, config);
         handler.handle().await
     }
-
-    /// 在单独的任务中启动服务器并返回其句柄。
-    pub fn start(addr: &str) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
-        let addr = addr.to_string();
-        let handle = tokio::spawn(async move {
-            let server = Self::new(&addr).await?;
-            server.run().await
-        });
-        
-        Ok(handle)
-    }
 }

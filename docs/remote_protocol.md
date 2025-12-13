@@ -115,6 +115,19 @@ print(response)
 }
 ```
 
+#### 6. 获取内置指令列表
+```json
+{
+  "GetCommands": null
+}
+```
+或简写形式：
+```json
+"GetCommands"
+```
+
+此输入类型用于请求获取Agent CLI的所有内置指令（TUI中的斜杠命令）列表。响应将包含命令名称和描述的JSON数组。
+
 ### 请求配置 (RequestConfig)
 
 ```json
@@ -295,6 +308,53 @@ print(response)
 }
 ```
 
+### 示例 4: 获取内置指令列表
+
+**请求:**
+```json
+{
+  "request_id": "commands_001",
+  "input": "GetCommands",
+  "stream": false,
+  "use_tools": false
+}
+```
+
+**响应:**
+```json
+{
+  "request_id": "commands_001",
+  "response": {
+    "Text": "{\"commands\":[{\"name\":\"help\",\"description\":\"显示帮助信息\"},{\"name\":\"clear\",\"description\":\"清除聊天记录\"},{\"name\":\"exit\",\"description\":\"退出程序\"},{\"name\":\"reset\",\"description\":\"重置对话上下文\"},{\"name\":\"history\",\"description\":\"显示历史记录\"},{\"name\":\"tools\",\"description\":\"显示可用工具列表\"},{\"name\":\"config\",\"description\":\"显示或修改配置\"}],\"count\":7}"
+  },
+  "error": null,
+  "token_usage": {
+    "prompt_tokens": 5,
+    "completion_tokens": 10,
+    "total_tokens": 15
+  }
+}
+```
+
+**说明:**
+此请求用于获取Agent CLI的所有内置指令（TUI中的斜杠命令）列表。响应中的`response.Text`字段包含一个JSON字符串，其中`commands`数组包含每个命令的名称和描述，`count`字段表示命令总数。
+
+要解析响应中的命令列表，客户端可以：
+```python
+import json
+
+# 假设response是收到的RemoteResponse对象
+response_text = response["response"]["Text"]
+commands_data = json.loads(response_text)
+commands = commands_data["commands"]
+count = commands_data["count"]
+
+for cmd in commands:
+    print(f"命令: {cmd['name']}")
+    print(f"描述: {cmd['description']}")
+    print()
+```
+
 ## 错误处理
 
 ### 错误响应示例
@@ -470,6 +530,7 @@ main();
 - v1.1.0: 添加流式响应支持
 - v1.2.0: 添加多种输入类型支持（图像、文件、指令等）
 - v1.3.0: 协议从 TCP 迁移到 WebSocket，提供更好的双向通信支持
+- v1.4.0: 添加获取内置指令列表功能（GetCommands），允许远端客户端查询TUI斜杠命令
 
 ## 支持与反馈
 

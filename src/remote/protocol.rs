@@ -28,6 +28,8 @@ pub enum InputType {
     },
     /// 多种输入类型的组合
     Multi(Vec<InputType>),
+    /// 获取内置指令列表
+    GetCommands,
 }
 
 impl InputType {
@@ -49,6 +51,7 @@ impl InputType {
                 let parts: Vec<String> = inputs.iter().map(|i| i.to_text()).collect();
                 parts.join(" + ")
             }
+            InputType::GetCommands => "[GetCommands]".to_string(),
         }
     }
 }
@@ -131,30 +134,7 @@ pub struct TokenUsage {
     pub total_tokens: u32,
 }
 
-impl RemoteRequest {
-    /// 创建一个新的文本请求。
-    pub fn text(request_id: &str, text: &str) -> Self {
-        Self {
-            request_id: request_id.to_string(),
-            input: InputType::Text(text.to_string()),
-            config: None,
-            stream: None,
-            use_tools: None,
-        }
-    }
-}
-
 impl RemoteResponse {
-    /// 创建一个成功的文本响应。
-    pub fn success(request_id: &str, text: &str) -> Self {
-        Self {
-            request_id: request_id.to_string(),
-            response: ResponseContent::Text(text.to_string()),
-            error: None,
-            token_usage: None,
-        }
-    }
-
     /// 创建一个错误响应。
     pub fn error(request_id: &str, error: &str) -> Self {
         Self {

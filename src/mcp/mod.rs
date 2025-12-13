@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::{
     config,
-    mcp::internalserver::{InternalTool, getbesttool::GetBestTool, filesystem::FileSystemTool},
+    mcp::internalserver::{InternalTool, filesystem::FileSystemTool},
 };
 
 pub async fn init() {

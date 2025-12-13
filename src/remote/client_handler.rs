@@ -9,7 +9,8 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio::net::TcpStream;
 use log::{info, error};
 
-use super::protocol::{RemoteRequest, RemoteResponse};
+use super::protocol::{RemoteRequest, RemoteResponse, InputType};
+use super::commands::global_registry;
 
 /// 用于处理单个客户端连接的处理器。
 pub struct ClientHandler {
@@ -118,6 +119,16 @@ impl ClientHandler {
     /// 处理单个请求（内部辅助函数，用于避免借用问题）。
     async fn process_request_internal(request: RemoteRequest, base_config: &Config) -> RemoteResponse {
         info!("Processing request: {}", request.request_id);
+        
+        // Handle GetCommands request
+        if let InputType::GetCommands = &request.input {
+            return Self::handle_get_commands(&request.request_id);
+        }
+        
+        // Handle Instruction request
+        if let InputType::Instruction { command, parameters } = &request.input {
+            return Self::handle_instruction(&request.request_id, command, parameters, base_config).await;
+        }
         
         // Extract text from input
         let input_text = request.input.to_text();
@@ -298,5 +309,79 @@ impl ClientHandler {
             error: None,
             token_usage,
         })
+    }
+
+    /// 处理获取内置指令列表的请求。
+    fn handle_get_commands(request_id: &str) -> RemoteResponse {
+        info!("Handling GetCommands request: {}", request_id);
+        
+        // 获取全局指令注册器
+        let registry = global_registry();
+        
+        // 构建命令列表
+        let mut commands_list = Vec::new();
+        for cmd in registry.all() {
+            commands_list.push(serde_json::json!({
+                "name": cmd.name(),
+                "description": cmd.description(),
+            }));
+        }
+        
+        // 创建响应
+        let response_json = serde_json::json!({
+            "commands": commands_list,
+            "count": commands_list.len(),
+        });
+        
+        RemoteResponse {
+            request_id: request_id.to_string(),
+            response: super::protocol::ResponseContent::Text(
+                serde_json::to_string(&response_json).unwrap_or_else(|_| "{\"error\": \"Failed to serialize commands\"}".to_string())
+            ),
+            error: None,
+            token_usage: None,
+        }
+    }
+
+    /// 处理指令请求。
+    async fn handle_instruction(
+        request_id: &str,
+        command: &str,
+        parameters: &serde_json::Value,
+        base_config: &Config,
+    ) -> RemoteResponse {
+        info!("Handling instruction request: {} - command: {}", request_id, command);
+        
+        // 获取全局指令注册器
+        let registry = global_registry();
+        
+        // 查找指令
+        let cmd = match registry.find(command) {
+            Some(cmd) => cmd,
+            None => {
+                return RemoteResponse::error(
+                    request_id,
+                    &format!("Unknown command: {}", command)
+                );
+            }
+        };
+        
+        // 创建聊天实例
+        let mut chat = Chat::new(base_config.clone());
+        
+        // 执行指令
+        match cmd.execute(&mut chat, parameters.clone()).await {
+            Ok(result) => {
+                RemoteResponse {
+                    request_id: request_id.to_string(),
+                    response: super::protocol::ResponseContent::Text(result),
+                    error: None,
+                    token_usage: None,
+                }
+            }
+            Err(error_msg) => {
+                RemoteResponse::error(request_id, &format!("Command execution failed: {}", error_msg))
+            }
+        }
     }
 }

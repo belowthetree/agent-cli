@@ -16,12 +16,13 @@ use super::commands::global_registry;
 pub struct ClientHandler {
     ws_stream: WebSocketStream<TcpStream>,
     config: Config,
+    chat: Option<Chat>,
 }
 
 impl ClientHandler {
     /// 创建一个新的客户端处理器。
     pub fn new(ws_stream: WebSocketStream<TcpStream>, config: Config) -> Self {
-        Self { ws_stream, config }
+        Self { ws_stream, config, chat: None }
     }
 
     /// 处理客户端连接。
@@ -48,8 +49,7 @@ impl ClientHandler {
                             };
 
                             // Process the request
-                            let config_clone = self.config.clone();
-                            let response = ClientHandler::process_request_internal(request, &config_clone).await;
+                            let response = self.process_request_internal(request).await;
                             
                             // Send the response
                             let response_json = serde_json::to_string(&response)?;
@@ -61,8 +61,7 @@ impl ClientHandler {
                             if let Ok(text) = String::from_utf8(data) {
                                 match serde_json::from_str::<RemoteRequest>(&text) {
                                     Ok(request) => {
-                                        let config_clone = self.config.clone();
-                                        let response = ClientHandler::process_request_internal(request, &config_clone).await;
+                                        let response = self.process_request_internal(request).await;
                                         let response_json = serde_json::to_string(&response)?;
                                         self.ws_stream.send(Message::Text(response_json)).await?;
                                     }
@@ -117,7 +116,7 @@ impl ClientHandler {
     }
 
     /// 处理单个请求（内部辅助函数，用于避免借用问题）。
-    async fn process_request_internal(request: RemoteRequest, base_config: &Config) -> RemoteResponse {
+    async fn process_request_internal(&mut self, request: RemoteRequest) -> RemoteResponse {
         info!("Processing request: {}", request.request_id);
         
         // Handle GetCommands request
@@ -127,14 +126,24 @@ impl ClientHandler {
         
         // Handle Instruction request
         if let InputType::Instruction { command, parameters } = &request.input {
-            return Self::handle_instruction(&request.request_id, command, parameters, base_config).await;
+            return Self::handle_instruction(&request.request_id, command, parameters, &self.config).await;
+        }
+        
+        // Handle Interrupt request
+        if let InputType::Interrupt = &request.input {
+            return self.handle_interrupt(&request.request_id);
+        }
+        
+        // Handle Regenerate request
+        if let InputType::Regenerate = &request.input {
+            return self.handle_regenerate(&request.request_id).await;
         }
         
         // Extract text from input
         let input_text = request.input.to_text();
         
         // Merge request config with default config
-        let mut chat_config = base_config.clone();
+        let mut chat_config = self.config.clone();
         if let Some(req_config) = &request.config {
             if let Some(max_tool_try) = req_config.max_tool_try {
                 chat_config.max_tool_try = max_tool_try;
@@ -153,23 +162,35 @@ impl ClientHandler {
             }
         }
 
-        // Create chat instance
-        let mut chat = Chat::new(chat_config);
-        
-        // Configure tools if requested
-        let use_tools = request.use_tools.unwrap_or(true);
-        if use_tools {
-            chat = chat.tools(mcp::get_config_tools());
-            chat = chat.tools(mcp::get_basic_tools());
-        }
+        // Get or create chat instance
+        let chat = match &mut self.chat {
+            Some(chat) => {
+                // Chat already exists, use it
+                // Note: We don't update config for existing chat
+                chat
+            }
+            None => {
+                let mut chat = Chat::new(chat_config);
+                
+                // Configure tools if requested
+                let use_tools = request.use_tools.unwrap_or(true);
+                if use_tools {
+                    chat = chat.tools(mcp::get_config_tools());
+                    chat = chat.tools(mcp::get_basic_tools());
+                }
+                
+                self.chat = Some(chat);
+                self.chat.as_mut().unwrap()
+            }
+        };
 
         // Determine streaming mode
         let stream_mode = request.stream.unwrap_or(false);
         
         let result = if stream_mode {
-            Self::process_streaming_chat(&mut chat, &input_text).await
+            Self::process_streaming_chat(chat, &input_text).await
         } else {
-            Self::process_non_streaming_chat(&mut chat, &input_text).await
+            Self::process_non_streaming_chat(chat, &input_text).await
         };
 
         match result {
@@ -382,6 +403,88 @@ impl ClientHandler {
             Err(error_msg) => {
                 RemoteResponse::error(request_id, &format!("Command execution failed: {}", error_msg))
             }
+        }
+    }
+
+    /// 处理中断请求。
+    fn handle_interrupt(&mut self, request_id: &str) -> RemoteResponse {
+        info!("Handling interrupt request: {}", request_id);
+        
+        if let Some(chat) = &self.chat {
+            if chat.is_running() {
+                chat.cancel();
+                info!("Chat interrupted successfully");
+                return RemoteResponse {
+                    request_id: request_id.to_string(),
+                    response: super::protocol::ResponseContent::Text("Model output interrupted successfully".to_string()),
+                    error: None,
+                    token_usage: None,
+                };
+            } else {
+                return RemoteResponse::error(request_id, "No active model output to interrupt");
+            }
+        } else {
+            return RemoteResponse::error(request_id, "No chat session found to interrupt");
+        }
+    }
+
+    /// 处理重新生成请求。
+    async fn handle_regenerate(&mut self, request_id: &str) -> RemoteResponse {
+        info!("Handling regenerate request: {}", request_id);
+        
+        if let Some(chat) = &mut self.chat {
+            if !chat.is_running() {
+                // 使用stream_rechat重新生成回复
+                let mut response_chunks = Vec::new();
+                
+                {
+                    let stream = chat.stream_rechat();
+                    futures::pin_mut!(stream);
+                    
+                    while let Some(result) = stream.next().await {
+                        match result {
+                            Ok(response) => {
+                                use crate::chat::StreamedChatResponse;
+                                match response {
+                                    StreamedChatResponse::Text(text) => {
+                                        response_chunks.push(text);
+                                    }
+                                    StreamedChatResponse::Reasoning(think) => {
+                                        if !think.is_empty() {
+                                            response_chunks.push(format!("[Reasoning: {}]", think));
+                                        }
+                                    }
+                                    StreamedChatResponse::ToolCall(tool_call) => {
+                                        response_chunks.push(format!("[Tool call: {}]", tool_call.function.name));
+                                    }
+                                    StreamedChatResponse::ToolResponse(tool_response) => {
+                                        if !tool_response.content.is_empty() {
+                                            response_chunks.push(format!("[Tool result: {}]", tool_response.content));
+                                        }
+                                    }
+                                    StreamedChatResponse::End => {
+                                        // End marker, do nothing here
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                return RemoteResponse::error(request_id, &format!("Regeneration error: {}", e));
+                            }
+                        }
+                    }
+                }
+                
+                RemoteResponse {
+                    request_id: request_id.to_string(),
+                    response: super::protocol::ResponseContent::Stream(response_chunks),
+                    error: None,
+                    token_usage: None,
+                }
+            } else {
+                RemoteResponse::error(request_id, "Cannot regenerate while model is running")
+            }
+        } else {
+            RemoteResponse::error(request_id, "No chat session found to regenerate")
         }
     }
 }

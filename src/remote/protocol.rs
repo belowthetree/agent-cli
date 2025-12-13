@@ -30,6 +30,10 @@ pub enum InputType {
     Multi(Vec<InputType>),
     /// 获取内置指令列表
     GetCommands,
+    /// 中断当前正在进行的模型输出
+    Interrupt,
+    /// 重新生成最后的回复
+    Regenerate,
 }
 
 impl InputType {
@@ -52,6 +56,8 @@ impl InputType {
                 parts.join(" + ")
             }
             InputType::GetCommands => "[GetCommands]".to_string(),
+            InputType::Interrupt => "[Interrupt]".to_string(),
+            InputType::Regenerate => "[Regenerate]".to_string(),
         }
     }
 }

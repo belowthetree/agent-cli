@@ -2,7 +2,6 @@ use crate::model::param::ToolCall;
 use serde::{Deserialize, Serialize};
 
 pub mod common;
-pub mod cache;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsage {

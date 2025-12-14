@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::sync::OnceLock;
 use tokio_stream::StreamExt;
 
-use crate::{connection::{CommonConnectionContent, TokenUsage, cache::{get_response_cache, generate_cache_key}}, model::param::ToolCall};
+use crate::{connection::{CommonConnectionContent, TokenUsage}, model::param::ToolCall};
 
 /// 全局 HTTP 客户端，支持连接池
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -158,16 +158,6 @@ pub struct DirectConnection;
 
 impl DirectConnection {
     pub async fn request(url: String, key: String, body: String)->Result<Vec<CommonConnectionContent>, anyhow::Error> {
-        // 生成缓存键
-        let cache_key = generate_cache_key(&url, &body);
-        
-        // 检查缓存
-        let cache = get_response_cache();
-        if let Some(cached_response) = cache.get(&cache_key).await {
-            info!("缓存命中: {}", url);
-            return Ok(cached_response);
-        }
-        
         info!("请求 {}", url);
         let client = get_http_client();
         let response = client
@@ -235,9 +225,6 @@ impl DirectConnection {
                             res.push(CommonConnectionContent::TokenUsage(token_usage));
                         }
                     }
-                    
-                    // 将响应存入缓存
-                    cache.set(cache_key, res.clone()).await;
                     
                     return Ok(res);
                 }

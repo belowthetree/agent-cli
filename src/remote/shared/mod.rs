@@ -1,6 +1,7 @@
 //! 共享工具和辅助函数模块
 
 use crate::chat::Chat;
+use crate::chat::StreamedChatResponse;
 use crate::remote::protocol::{RemoteResponse, ResponseContent, TokenUsage, RemoteRequest, InputType};
 use futures::{SinkExt, StreamExt};
 use log::{info, warn, error};
@@ -14,6 +15,7 @@ pub async fn process_streaming_chat_with_ws(
     ws_stream: &mut WebSocketStream<TcpStream>,
     chat: &mut Chat,
     input: &str,
+    request_id: &str,
 ) -> Result<RemoteResponse> {
     let mut response_chunks = Vec::new();
     let mut tool_errors = Vec::new();
@@ -34,18 +36,49 @@ pub async fn process_streaming_chat_with_ws(
                         Some(result) => {
                             match result {
                                 Ok(response) => {
-                                    use crate::chat::StreamedChatResponse;
                                     match response {
                                         StreamedChatResponse::Text(text) => {
-                                            response_chunks.push(text);
+                                            response_chunks.push(text.clone());
+                                            // 实时发送文本块给客户端
+                                            let chunk_response = RemoteResponse {
+                                                request_id: request_id.to_string(),
+                                                response: ResponseContent::Text(text),
+                                                error: None,
+                                                token_usage: None,
+                                            };
+                                            if let Ok(json) = serde_json::to_string(&chunk_response) {
+                                                let _ = ws_stream.send(Message::Text(json)).await;
+                                            }
                                         }
                                         StreamedChatResponse::Reasoning(think) => {
                                             if !think.is_empty() {
-                                                response_chunks.push(format!("[Reasoning: {}]", think));
+                                                let formatted = format!("[Reasoning: {}]", think);
+                                                response_chunks.push(formatted.clone());
+                                                // 实时发送推理内容给客户端
+                                                let chunk_response = RemoteResponse {
+                                                    request_id: request_id.to_string(),
+                                                    response: ResponseContent::Text(formatted),
+                                                    error: None,
+                                                    token_usage: None,
+                                                };
+                                                if let Ok(json) = serde_json::to_string(&chunk_response) {
+                                                    let _ = ws_stream.send(Message::Text(json)).await;
+                                                }
                                             }
                                         }
                                         StreamedChatResponse::ToolCall(tool_call) => {
-                                            response_chunks.push(format!("[Tool call: {}]", tool_call.function.name));
+                                            let formatted = format!("[Tool call: {}]", tool_call.function.name);
+                                            response_chunks.push(formatted.clone());
+                                            // 实时发送工具调用信息给客户端
+                                            let chunk_response = RemoteResponse {
+                                                request_id: request_id.to_string(),
+                                                response: ResponseContent::Text(formatted),
+                                                error: None,
+                                                token_usage: None,
+                                            };
+                                            if let Ok(json) = serde_json::to_string(&chunk_response) {
+                                                let _ = ws_stream.send(Message::Text(json)).await;
+                                            }
                                         }
                                         StreamedChatResponse::ToolResponse(tool_response) => {
                                             if !tool_response.content.is_empty() {
@@ -86,7 +119,18 @@ pub async fn process_streaming_chat_with_ws(
                                                     }
                                                 }
                                                 
-                                                response_chunks.push(format!("[Tool result: {}]", tool_response.content));
+                                                let formatted = format!("[Tool result: {}]", tool_response.content);
+                                                response_chunks.push(formatted.clone());
+                                                // 实时发送工具结果给客户端
+                                                let chunk_response = RemoteResponse {
+                                                    request_id: request_id.to_string(),
+                                                    response: ResponseContent::Text(formatted),
+                                                    error: None,
+                                                    token_usage: None,
+                                                };
+                                                if let Ok(json) = serde_json::to_string(&chunk_response) {
+                                                    let _ = ws_stream.send(Message::Text(json)).await;
+                                                }
                                             }
                                         }
                                         StreamedChatResponse::End => {
@@ -239,10 +283,12 @@ pub async fn process_streaming_chat_with_ws(
             arguments,
         ));
     }
-    
+
+    // 返回一个空的响应，表示流已完成
+    // 所有响应块都已经实时发送给客户端
     Ok(RemoteResponse {
         request_id: String::new(), // Will be replaced by caller
-        response: ResponseContent::Stream(response_chunks),
+        response: ResponseContent::Text("".to_string()),
         error: None,
         token_usage,
     })

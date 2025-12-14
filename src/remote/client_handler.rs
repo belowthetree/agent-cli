@@ -48,6 +48,15 @@ impl ClientHandler {
                                 }
                             };
 
+                            // Check if this is an interrupt request while chat is running
+                            if let InputType::Interrupt = &request.input {
+                                // Handle interrupt immediately
+                                let response = self.handle_interrupt(&request.request_id);
+                                let response_json = serde_json::to_string(&response)?;
+                                self.ws_stream.send(Message::Text(response_json)).await?;
+                                continue;
+                            }
+
                             // Process the request
                             let response = self.process_request_internal(request).await;
                             
@@ -61,6 +70,15 @@ impl ClientHandler {
                             if let Ok(text) = String::from_utf8(data) {
                                 match serde_json::from_str::<RemoteRequest>(&text) {
                                     Ok(request) => {
+                                        // Check if this is an interrupt request while chat is running
+                                        if let InputType::Interrupt = &request.input {
+                                            // Handle interrupt immediately
+                                            let response = self.handle_interrupt(&request.request_id);
+                                            let response_json = serde_json::to_string(&response)?;
+                                            self.ws_stream.send(Message::Text(response_json)).await?;
+                                            continue;
+                                        }
+
                                         let response = self.process_request_internal(request).await;
                                         let response_json = serde_json::to_string(&response)?;
                                         self.ws_stream.send(Message::Text(response_json)).await?;
@@ -86,9 +104,9 @@ impl ClientHandler {
                         Message::Pong(_) => {
                             // Ignore pong messages
                         }
-                        Message::Close(frame) => {
-                            info!("Received close frame: {:?}", frame);
-                            if let Some(frame) = frame {
+                        Message::Close(_frame) => {
+                            info!("Received close frame: {:?}", _frame);
+                            if let Some(frame) = _frame {
                                 self.ws_stream.send(Message::Close(Some(frame))).await?;
                             } else {
                                 self.ws_stream.send(Message::Close(None)).await?;
@@ -171,37 +189,9 @@ impl ClientHandler {
                 chat_config.prompt = Some(prompt.clone());
             }
         }
-
-        // Get or create chat instance
-        let chat = match &mut self.chat {
-            Some(chat) => {
-                // Chat already exists, use it
-                // Note: We don't update config for existing chat
-                chat
-            }
-            None => {
-                let mut chat = Chat::new(chat_config);
-                
-                // Configure tools if requested
-                let use_tools = request.use_tools.unwrap_or(true);
-                if use_tools {
-                    chat = chat.tools(mcp::get_config_tools());
-                    chat = chat.tools(mcp::get_basic_tools());
-                }
-                
-                self.chat = Some(chat);
-                self.chat.as_mut().unwrap()
-            }
-        };
-
-        // Determine streaming mode
-        let stream_mode = request.stream.unwrap_or(false);
         
-        let result = if stream_mode {
-            Self::process_streaming_chat(chat, &input_text).await
-        } else {
-            Self::process_non_streaming_chat(chat, &input_text).await
-        };
+        let result = 
+            self.process_streaming_chat_with_config(&input_text, chat_config, request.use_tools.unwrap_or(true)).await;
 
         match result {
             Ok(mut response) => {
@@ -214,7 +204,9 @@ impl ClientHandler {
     }
 
     /// 处理非流式聊天请求。
+    #[allow(dead_code)]
     async fn process_non_streaming_chat(
+        &mut self,
         chat: &mut Chat,
         input: &str,
     ) -> anyhow::Result<RemoteResponse> {
@@ -223,77 +215,171 @@ impl ClientHandler {
         let mut response_text = String::new();
         let mut tool_errors = Vec::new();
         
+        // Get a copy of the cancel token before creating the stream
+        let cancel_token = chat.get_cancel_token();
+        
         // Consume the stream in an inner scope to ensure it's dropped before accessing chat.context
         {
             let stream = chat.chat(input);
             futures::pin_mut!(stream);
             
-            while let Some(result) = stream.next().await {
-                match result {
-                    Ok(response) => {
-                        use crate::chat::StreamedChatResponse;
-                        match response {
-                            StreamedChatResponse::Text(text) => {
-                                response_text.push_str(&text);
-                            }
-                            StreamedChatResponse::Reasoning(think) => {
-                                // Optionally include reasoning in response
-                                if !think.is_empty() {
-                                    response_text.push_str(&format!("[Reasoning: {}] ", think));
-                                }
-                            }
-                            StreamedChatResponse::ToolCall(tool_call) => {
-                                response_text.push_str(&format!("[Tool call: {}] ", tool_call.function.name));
-                            }
-                            StreamedChatResponse::ToolResponse(tool_response) => {
-                                if !tool_response.content.is_empty() {
-                                    // Check if the tool response contains an error
-                                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&tool_response.content) {
-                                        if let Some(error_field) = json_value.get("error") {
-                                            if error_field == true {
-                                                // This is a tool error, extract details
-                                                let tool_name = if let Some(tool_calls) = &tool_response.tool_calls {
-                                                    if let Some(tool_call) = tool_calls.first() {
-                                                        tool_call.function.name.clone()
-                                                    } else {
-                                                        "unknown".to_string()
-                                                    }
-                                                } else {
-                                                    "unknown".to_string()
-                                                };
-                                                
-                                                let error_message = json_value.get("message")
-                                                    .and_then(|m| m.as_str())
-                                                    .unwrap_or("Tool execution failed");
-                                                
-                                                let arguments = if let Some(tool_calls) = &tool_response.tool_calls {
-                                                    if let Some(tool_call) = tool_calls.first() {
-                                                        match serde_json::from_str(&tool_call.function.arguments) {
-                                                            Ok(args) => Some(args),
-                                                            Err(_) => None,
+            loop {
+                // Use tokio::select! to concurrently wait for stream items and WebSocket messages
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(result) => {
+                                match result {
+                                    Ok(response) => {
+                                        use crate::chat::StreamedChatResponse;
+                                        match response {
+                                            StreamedChatResponse::Text(text) => {
+                                                response_text.push_str(&text);
+                                            }
+                                            StreamedChatResponse::Reasoning(think) => {
+                                                // Optionally include reasoning in response
+                                                if !think.is_empty() {
+                                                    response_text.push_str(&format!("[Reasoning: {}] ", think));
+                                                }
+                                            }
+                                            StreamedChatResponse::ToolCall(tool_call) => {
+                                                response_text.push_str(&format!("[Tool call: {}] ", tool_call.function.name));
+                                            }
+                                            StreamedChatResponse::ToolResponse(tool_response) => {
+                                                if !tool_response.content.is_empty() {
+                                                    // Check if the tool response contains an error
+                                                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&tool_response.content) {
+                                                        if let Some(error_field) = json_value.get("error") {
+                                                            if error_field == true {
+                                                                // This is a tool error, extract details
+                                                                let tool_name = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                                    if let Some(tool_call) = tool_calls.first() {
+                                                                        tool_call.function.name.clone()
+                                                                    } else {
+                                                                        "unknown".to_string()
+                                                                    }
+                                                                } else {
+                                                                    "unknown".to_string()
+                                                                };
+                                                                
+                                                                let error_message = json_value.get("message")
+                                                                    .and_then(|m| m.as_str())
+                                                                    .unwrap_or("Tool execution failed");
+                                                                
+                                                                let arguments = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                                    if let Some(tool_call) = tool_calls.first() {
+                                                                        match serde_json::from_str(&tool_call.function.arguments) {
+                                                                            Ok(args) => Some(args),
+                                                                            Err(_) => None,
+                                                                        }
+                                                                    } else {
+                                                                        None
+                                                                    }
+                                                                } else {
+                                                                    None
+                                                                };
+                                                                
+                                                                tool_errors.push((tool_name, error_message.to_string(), arguments));
+                                                            }
                                                         }
-                                                    } else {
-                                                        None
                                                     }
-                                                } else {
-                                                    None
-                                                };
-                                                
-                                                tool_errors.push((tool_name, error_message.to_string(), arguments));
+                                                    
+                                                    response_text.push_str(&format!("[Tool result: {}] ", tool_response.content));
+                                                }
+                                            }
+                                            StreamedChatResponse::End => {
+                                                // End marker, break the loop
+                                                break;
                                             }
                                         }
                                     }
-                                    
-                                    response_text.push_str(&format!("[Tool result: {}] ", tool_response.content));
+                                    Err(e) => {
+                                        return Err(anyhow::anyhow!("Chat error: {}", e));
+                                    }
                                 }
                             }
-                            StreamedChatResponse::End => {
-                                // End marker, do nothing here
+                            None => {
+                                // Stream ended
+                                break;
                             }
                         }
                     }
-                    Err(e) => {
-                        return Err(anyhow::anyhow!("Chat error: {}", e));
+                    // Check for WebSocket messages (interrupt requests)
+                    ws_message = self.ws_stream.next() => {
+                        match ws_message {
+                            Some(Ok(message)) => {
+                                match message {
+                                    Message::Text(text) => {
+                                        info!("Received WebSocket message during chat processing: {}", text);
+                                        
+                                        // Try to parse as interrupt request
+                                        if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
+                                            if let InputType::Interrupt = &request.input {
+                                                // Handle interrupt immediately
+                                                cancel_token.cancel();
+                                                info!("Chat interrupted during processing");
+                                                // Return a response indicating interruption
+                                                return Ok(RemoteResponse {
+                                                    request_id: String::new(), // Will be replaced by caller
+                                                    response: super::protocol::ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                    error: None,
+                                                    token_usage: None,
+                                                });
+                                            }
+                                        }
+                                        // If not an interrupt, ignore for now (could queue it for later)
+                                    }
+                                    Message::Binary(data) => {
+                                        // Try to parse binary as JSON string
+                                        if let Ok(text) = String::from_utf8(data) {
+                                            info!("Received binary WebSocket message during chat processing: {}", text);
+                                            
+                                            if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
+                                                if let InputType::Interrupt = &request.input {
+                                                    // Handle interrupt immediately
+                                                    cancel_token.cancel();
+                                                    info!("Chat interrupted during processing");
+                                                    // Return a response indicating interruption
+                                                    return Ok(RemoteResponse {
+                                                        request_id: String::new(), // Will be replaced by caller
+                                                        response: super::protocol::ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                        error: None,
+                                                        token_usage: None,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Message::Ping(data) => {
+                                        // Respond to ping
+                                        let _ = self.ws_stream.send(Message::Pong(data)).await;
+                                    }
+                                    Message::Pong(_) => {
+                                        // Ignore pong
+                                    }
+                                    Message::Close(_frame) => {
+                                        // Connection closed, cancel chat
+                                        cancel_token.cancel();
+                                        info!("WebSocket closed during chat processing");
+                                        return Err(anyhow::anyhow!("WebSocket connection closed during chat processing"));
+                                    }
+                                    Message::Frame(_) => {
+                                        // Ignore raw frames
+                                    }
+                                }
+                            }
+                            Some(Err(e)) => {
+                                error!("WebSocket error during chat processing: {}", e);
+                                cancel_token.cancel();
+                                return Err(anyhow::anyhow!("WebSocket error: {}", e));
+                            }
+                            None => {
+                                // WebSocket closed
+                                cancel_token.cancel();
+                                info!("WebSocket connection closed during chat processing");
+                                return Err(anyhow::anyhow!("WebSocket connection closed"));
+                            }
+                        }
                     }
                 }
             }
@@ -361,7 +447,9 @@ impl ClientHandler {
     }
 
     /// 处理流式聊天请求。
+    #[allow(dead_code)]
     async fn process_streaming_chat(
+        &mut self,
         chat: &mut Chat,
         input: &str,
     ) -> anyhow::Result<RemoteResponse> {
@@ -370,76 +458,170 @@ impl ClientHandler {
         let mut response_chunks = Vec::new();
         let mut tool_errors = Vec::new();
         
+        // Get a copy of the cancel token before creating the stream
+        let cancel_token = chat.get_cancel_token();
+        
         // Consume the stream in an inner scope to ensure it's dropped before accessing chat.context
         {
             let stream = chat.stream_chat(input);
             futures::pin_mut!(stream);
             
-            while let Some(result) = stream.next().await {
-                match result {
-                    Ok(response) => {
-                        use crate::chat::StreamedChatResponse;
-                        match response {
-                            StreamedChatResponse::Text(text) => {
-                                response_chunks.push(text);
-                            }
-                            StreamedChatResponse::Reasoning(think) => {
-                                if !think.is_empty() {
-                                    response_chunks.push(format!("[Reasoning: {}]", think));
-                                }
-                            }
-                            StreamedChatResponse::ToolCall(tool_call) => {
-                                response_chunks.push(format!("[Tool call: {}]", tool_call.function.name));
-                            }
-                            StreamedChatResponse::ToolResponse(tool_response) => {
-                                if !tool_response.content.is_empty() {
-                                    // Check if the tool response contains an error
-                                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&tool_response.content) {
-                                        if let Some(error_field) = json_value.get("error") {
-                                            if error_field == true {
-                                                // This is a tool error, extract details
-                                                let tool_name = if let Some(tool_calls) = &tool_response.tool_calls {
-                                                    if let Some(tool_call) = tool_calls.first() {
-                                                        tool_call.function.name.clone()
-                                                    } else {
-                                                        "unknown".to_string()
-                                                    }
-                                                } else {
-                                                    "unknown".to_string()
-                                                };
-                                                
-                                                let error_message = json_value.get("message")
-                                                    .and_then(|m| m.as_str())
-                                                    .unwrap_or("Tool execution failed");
-                                                
-                                                let arguments = if let Some(tool_calls) = &tool_response.tool_calls {
-                                                    if let Some(tool_call) = tool_calls.first() {
-                                                        match serde_json::from_str(&tool_call.function.arguments) {
-                                                            Ok(args) => Some(args),
-                                                            Err(_) => None,
+            loop {
+                // Use tokio::select! to concurrently wait for stream items and WebSocket messages
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(result) => {
+                                match result {
+                                    Ok(response) => {
+                                        use crate::chat::StreamedChatResponse;
+                                        match response {
+                                            StreamedChatResponse::Text(text) => {
+                                                response_chunks.push(text);
+                                            }
+                                            StreamedChatResponse::Reasoning(think) => {
+                                                if !think.is_empty() {
+                                                    response_chunks.push(format!("[Reasoning: {}]", think));
+                                                }
+                                            }
+                                            StreamedChatResponse::ToolCall(tool_call) => {
+                                                response_chunks.push(format!("[Tool call: {}]", tool_call.function.name));
+                                            }
+                                            StreamedChatResponse::ToolResponse(tool_response) => {
+                                                if !tool_response.content.is_empty() {
+                                                    // Check if the tool response contains an error
+                                                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&tool_response.content) {
+                                                        if let Some(error_field) = json_value.get("error") {
+                                                            if error_field == true {
+                                                                // This is a tool error, extract details
+                                                                let tool_name = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                                    if let Some(tool_call) = tool_calls.first() {
+                                                                        tool_call.function.name.clone()
+                                                                    } else {
+                                                                        "unknown".to_string()
+                                                                    }
+                                                                } else {
+                                                                    "unknown".to_string()
+                                                                };
+                                                                
+                                                                let error_message = json_value.get("message")
+                                                                    .and_then(|m| m.as_str())
+                                                                    .unwrap_or("Tool execution failed");
+                                                                
+                                                                let arguments = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                                    if let Some(tool_call) = tool_calls.first() {
+                                                                        match serde_json::from_str(&tool_call.function.arguments) {
+                                                                            Ok(args) => Some(args),
+                                                                            Err(_) => None,
+                                                                        }
+                                                                    } else {
+                                                                        None
+                                                                    }
+                                                                } else {
+                                                                    None
+                                                                };
+                                                                
+                                                                tool_errors.push((tool_name, error_message.to_string(), arguments));
+                                                            }
                                                         }
-                                                    } else {
-                                                        None
                                                     }
-                                                } else {
-                                                    None
-                                                };
-                                                
-                                                tool_errors.push((tool_name, error_message.to_string(), arguments));
+                                                    
+                                                    response_chunks.push(format!("[Tool result: {}]", tool_response.content));
+                                                }
+                                            }
+                                            StreamedChatResponse::End => {
+                                                // End marker, break the loop
+                                                break;
                                             }
                                         }
                                     }
-                                    
-                                    response_chunks.push(format!("[Tool result: {}]", tool_response.content));
+                                    Err(e) => {
+                                        return Err(anyhow::anyhow!("Chat error: {}", e));
+                                    }
                                 }
                             }
-                            StreamedChatResponse::End => {
-                                // End marker, do nothing here
+                            None => {
+                                // Stream ended
+                                break;
                             }
                         }
                     }
-                    Err(e) => {
-                        return Err(anyhow::anyhow!("Chat error: {}", e));
+                    // Check for WebSocket messages (interrupt requests)
+                    ws_message = self.ws_stream.next() => {
+                        match ws_message {
+                            Some(Ok(message)) => {
+                                match message {
+                                    Message::Text(text) => {
+                                        info!("Received WebSocket message during streaming chat processing: {}", text);
+                                        
+                                        // Try to parse as interrupt request
+                                        if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
+                                            if let InputType::Interrupt = &request.input {
+                                                // Handle interrupt immediately
+                                                cancel_token.cancel();
+                                                info!("Streaming chat interrupted during processing");
+                                                // Return a response indicating interruption
+                                                return Ok(RemoteResponse {
+                                                    request_id: String::new(), // Will be replaced by caller
+                                                    response: super::protocol::ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                    error: None,
+                                                    token_usage: None,
+                                                });
+                                            }
+                                        }
+                                        // If not an interrupt, ignore for now (could queue it for later)
+                                    }
+                                    Message::Binary(data) => {
+                                        // Try to parse binary as JSON string
+                                        if let Ok(text) = String::from_utf8(data) {
+                                            info!("Received binary WebSocket message during streaming chat processing: {}", text);
+                                            
+                                            if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
+                                                if let InputType::Interrupt = &request.input {
+                                                    // Handle interrupt immediately
+                                                    cancel_token.cancel();
+                                                    info!("Streaming chat interrupted during processing");
+                                                    // Return a response indicating interruption
+                                                    return Ok(RemoteResponse {
+                                                        request_id: String::new(), // Will be replaced by caller
+                                                        response: super::protocol::ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                        error: None,
+                                                        token_usage: None,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Message::Ping(data) => {
+                                        // Respond to ping
+                                        let _ = self.ws_stream.send(Message::Pong(data)).await;
+                                    }
+                                    Message::Pong(_) => {
+                                        // Ignore pong
+                                    }
+                                    Message::Close(_frame) => {
+                                        // Connection closed, cancel chat
+                                        cancel_token.cancel();
+                                        info!("WebSocket closed during streaming chat processing");
+                                        return Err(anyhow::anyhow!("WebSocket connection closed during streaming chat processing"));
+                                    }
+                                    Message::Frame(_) => {
+                                        // Ignore raw frames
+                                    }
+                                }
+                            }
+                            Some(Err(e)) => {
+                                error!("WebSocket error during streaming chat processing: {}", e);
+                                cancel_token.cancel();
+                                return Err(anyhow::anyhow!("WebSocket error: {}", e));
+                            }
+                            None => {
+                                // WebSocket closed
+                                cancel_token.cancel();
+                                info!("WebSocket connection closed during streaming chat processing");
+                                return Err(anyhow::anyhow!("WebSocket connection closed"));
+                            }
+                        }
                     }
                 }
             }
@@ -740,27 +922,21 @@ impl ClientHandler {
                 }
                 
                 // 继续处理工具调用
-                let result = if approved {
-                    // 如果批准，继续执行工具
-                    Self::process_non_streaming_chat(chat, "").await
-                } else {
-                    // 如果不批准，返回错误
-                    Ok(RemoteResponse {
-                        request_id: String::new(),
-                        response: super::protocol::ResponseContent::Text(
-                            format!("Tool '{}' execution was not approved by user", tool_name)
-                        ),
-                        error: None,
-                        token_usage: None,
-                    })
-                };
+                let result: Result<RemoteResponse, ()> = Ok(RemoteResponse {
+                    request_id: String::new(),
+                    response: super::protocol::ResponseContent::Text(
+                        format!("Tool '{}' execution was not approved by user", tool_name)
+                    ),
+                    error: None,
+                    token_usage: None,
+                });
                 
                 match result {
                     Ok(mut response) => {
                         response.request_id = request_id.to_string();
                         response
                     }
-                    Err(e) => RemoteResponse::error(request_id, &format!("Tool confirmation processing error: {}", e)),
+                    Err(e) => RemoteResponse::error(request_id, &format!("Tool confirmation processing error: {:?}", e)),
                 }
             } else {
                 RemoteResponse::error(request_id, "No pending tool confirmation found")
@@ -797,5 +973,521 @@ impl ClientHandler {
         } else {
             RemoteResponse::error(request_id, "No chat session found to clear context")
         }
+    }
+
+    /// 使用配置处理流式聊天请求。
+    async fn process_streaming_chat_with_config(
+        &mut self,
+        input: &str,
+        config: Config,
+        use_tools: bool,
+    ) -> anyhow::Result<RemoteResponse> {
+        // Get or create chat instance
+        let chat = match &mut self.chat {
+            Some(chat) => {
+                // Chat already exists, use it
+                // Note: We don't update config for existing chat
+                chat
+            }
+            None => {
+                let mut chat = Chat::new(config);
+                
+                // Configure tools if requested
+                if use_tools {
+                    chat = chat.tools(mcp::get_config_tools());
+                    chat = chat.tools(mcp::get_basic_tools());
+                }
+                
+                self.chat = Some(chat);
+                self.chat.as_mut().unwrap()
+            }
+        };
+
+        // 为了避免借用冲突，分别借用 ws_stream 和 chat
+        let ws_stream = &mut self.ws_stream;
+        Self::process_streaming_chat_with_ws(ws_stream, chat, input).await
+    }
+
+    /// 处理非流式聊天请求（静态方法版本，避免借用冲突）。
+    async fn process_non_streaming_chat_with_ws(
+        ws_stream: &mut WebSocketStream<TcpStream>,
+        chat: &mut Chat,
+        input: &str,
+    ) -> anyhow::Result<RemoteResponse> {
+        use futures::StreamExt;
+        
+        let mut response_text = String::new();
+        let mut tool_errors = Vec::new();
+        
+        // Get a copy of the cancel token before creating the stream
+        let cancel_token = chat.get_cancel_token();
+        
+        // Consume the stream in an inner scope to ensure it's dropped before accessing chat.context
+        {
+            let stream = chat.chat(input);
+            futures::pin_mut!(stream);
+            
+            loop {
+                // Use tokio::select! to concurrently wait for stream items and WebSocket messages
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(result) => {
+                                match result {
+                                    Ok(response) => {
+                                        use crate::chat::StreamedChatResponse;
+                                        match response {
+                                            StreamedChatResponse::Text(text) => {
+                                                response_text.push_str(&text);
+                                            }
+                                            StreamedChatResponse::Reasoning(think) => {
+                                                // Optionally include reasoning in response
+                                                if !think.is_empty() {
+                                                    response_text.push_str(&format!("[Reasoning: {}] ", think));
+                                                }
+                                            }
+                                            StreamedChatResponse::ToolCall(tool_call) => {
+                                                response_text.push_str(&format!("[Tool call: {}] ", tool_call.function.name));
+                                            }
+                                            StreamedChatResponse::ToolResponse(tool_response) => {
+                                                if !tool_response.content.is_empty() {
+                                                    // Check if the tool response contains an error
+                                                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&tool_response.content) {
+                                                        if let Some(error_field) = json_value.get("error") {
+                                                            if error_field == true {
+                                                                // This is a tool error, extract details
+                                                                let tool_name = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                                    if let Some(tool_call) = tool_calls.first() {
+                                                                        tool_call.function.name.clone()
+                                                                    } else {
+                                                                        "unknown".to_string()
+                                                                    }
+                                                                } else {
+                                                                    "unknown".to_string()
+                                                                };
+                                                                
+                                                                let error_message = json_value.get("message")
+                                                                    .and_then(|m| m.as_str())
+                                                                    .unwrap_or("Tool execution failed");
+                                                                
+                                                                let arguments = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                                    if let Some(tool_call) = tool_calls.first() {
+                                                                        match serde_json::from_str(&tool_call.function.arguments) {
+                                                                            Ok(args) => Some(args),
+                                                                            Err(_) => None,
+                                                                        }
+                                                                    } else {
+                                                                        None
+                                                                    }
+                                                                } else {
+                                                                    None
+                                                                };
+                                                                
+                                                                tool_errors.push((tool_name, error_message.to_string(), arguments));
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    response_text.push_str(&format!("[Tool result: {}] ", tool_response.content));
+                                                }
+                                            }
+                                            StreamedChatResponse::End => {
+                                                // End marker, break the loop
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        return Err(anyhow::anyhow!("Chat error: {}", e));
+                                    }
+                                }
+                            }
+                            None => {
+                                // Stream ended
+                                break;
+                            }
+                        }
+                    }
+                    // Check for WebSocket messages (interrupt requests)
+                    ws_message = ws_stream.next() => {
+                        match ws_message {
+                            Some(Ok(message)) => {
+                                match message {
+                                    Message::Text(text) => {
+                                        info!("Received WebSocket message during chat processing: {}", text);
+                                        
+                                        // Try to parse as interrupt request
+                                        if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
+                                            if let InputType::Interrupt = &request.input {
+                                                // Handle interrupt immediately
+                                                cancel_token.cancel();
+                                                info!("Chat interrupted during processing");
+                                                // Return a response indicating interruption
+                                                return Ok(RemoteResponse {
+                                                    request_id: String::new(), // Will be replaced by caller
+                                                    response: super::protocol::ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                    error: None,
+                                                    token_usage: None,
+                                                });
+                                            }
+                                        }
+                                        // If not an interrupt, ignore for now (could queue it for later)
+                                    }
+                                    Message::Binary(data) => {
+                                        // Try to parse binary as JSON string
+                                        if let Ok(text) = String::from_utf8(data) {
+                                            info!("Received binary WebSocket message during chat processing: {}", text);
+                                            
+                                            if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
+                                                if let InputType::Interrupt = &request.input {
+                                                    // Handle interrupt immediately
+                                                    cancel_token.cancel();
+                                                    info!("Chat interrupted during processing");
+                                                    // Return a response indicating interruption
+                                                    return Ok(RemoteResponse {
+                                                        request_id: String::new(), // Will be replaced by caller
+                                                        response: super::protocol::ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                        error: None,
+                                                        token_usage: None,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Message::Ping(data) => {
+                                        // Respond to ping
+                                        let _ = ws_stream.send(Message::Pong(data)).await;
+                                    }
+                                    Message::Pong(_) => {
+                                        // Ignore pong
+                                    }
+                                    Message::Close(_frame) => {
+                                        // Connection closed, cancel chat
+                                        cancel_token.cancel();
+                                        info!("WebSocket closed during chat processing");
+                                        return Err(anyhow::anyhow!("WebSocket connection closed during chat processing"));
+                                    }
+                                    Message::Frame(_) => {
+                                        // Ignore raw frames
+                                    }
+                                }
+                            }
+                            Some(Err(e)) => {
+                                error!("WebSocket error during chat processing: {}", e);
+                                cancel_token.cancel();
+                                return Err(anyhow::anyhow!("WebSocket error: {}", e));
+                            }
+                            None => {
+                                // WebSocket closed
+                                cancel_token.cancel();
+                                info!("WebSocket connection closed during chat processing");
+                                return Err(anyhow::anyhow!("WebSocket connection closed"));
+                            }
+                        }
+                    }
+                }
+            }
+        } // stream is dropped here, releasing the mutable borrow on chat
+        
+        // Check if chat is waiting for tool confirmation
+        if chat.is_waiting_tool_confirmation() {
+            // Get the last tool call from context
+            if let Some(last_msg) = chat.context.last() {
+                if let Some(tool_calls) = &last_msg.tool_calls {
+                    if let Some(tool_call) = tool_calls.first() {
+                        // Parse arguments string to JSON value
+                        let arguments: serde_json::Value = match serde_json::from_str(&tool_call.function.arguments) {
+                            Ok(args) => args,
+                            Err(e) => {
+                                // If parsing fails, create an empty object
+                                warn!("Failed to parse tool arguments as JSON: {}", e);
+                                serde_json::json!({})
+                            }
+                        };
+                        
+                        // Return a tool confirmation request
+                        return Ok(RemoteResponse {
+                            request_id: String::new(), // Will be replaced by caller
+                            response: super::protocol::ResponseContent::ToolConfirmationRequest {
+                                name: tool_call.function.name.clone(),
+                                arguments,
+                                description: None,
+                            },
+                            error: None,
+                            token_usage: None,
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Get token usage from last message if available (after stream is consumed and dropped)
+        let token_usage = chat.context.last().and_then(|last_msg| {
+            last_msg.token_usage.as_ref().map(|usage| super::protocol::TokenUsage {
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens,
+                total_tokens: usage.total_tokens,
+            })
+        });
+        
+        // If there are tool errors, return a tool error response
+        if !tool_errors.is_empty() {
+            // For now, return the first tool error
+            let (tool_name, error_message, arguments) = tool_errors.remove(0);
+            return Ok(RemoteResponse::tool_error(
+                "", // Will be replaced by caller
+                &tool_name,
+                &error_message,
+                arguments,
+            ));
+        }
+        
+        Ok(RemoteResponse {
+            request_id: String::new(), // Will be replaced by caller
+            response: super::protocol::ResponseContent::Text(response_text),
+            error: None,
+            token_usage,
+        })
+    }
+
+    /// 处理流式聊天请求（静态方法版本，避免借用冲突）。
+    async fn process_streaming_chat_with_ws(
+        ws_stream: &mut WebSocketStream<TcpStream>,
+        chat: &mut Chat,
+        input: &str,
+    ) -> anyhow::Result<RemoteResponse> {
+        use futures::StreamExt;
+        
+        let mut response_chunks = Vec::new();
+        let mut tool_errors = Vec::new();
+        
+        // Get a copy of the cancel token before creating the stream
+        let cancel_token = chat.get_cancel_token();
+        
+        // Consume the stream in an inner scope to ensure it's dropped before accessing chat.context
+        {
+            let stream = chat.stream_chat(input);
+            futures::pin_mut!(stream);
+            
+            loop {
+                // Use tokio::select! to concurrently wait for stream items and WebSocket messages
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(result) => {
+                                match result {
+                                    Ok(response) => {
+                                        use crate::chat::StreamedChatResponse;
+                                        match response {
+                                            StreamedChatResponse::Text(text) => {
+                                                response_chunks.push(text);
+                                            }
+                                            StreamedChatResponse::Reasoning(think) => {
+                                                if !think.is_empty() {
+                                                    response_chunks.push(format!("[Reasoning: {}]", think));
+                                                }
+                                            }
+                                            StreamedChatResponse::ToolCall(tool_call) => {
+                                                response_chunks.push(format!("[Tool call: {}]", tool_call.function.name));
+                                            }
+                                            StreamedChatResponse::ToolResponse(tool_response) => {
+                                                if !tool_response.content.is_empty() {
+                                                    // Check if the tool response contains an error
+                                                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&tool_response.content) {
+                                                        if let Some(error_field) = json_value.get("error") {
+                                                            if error_field == true {
+                                                                // This is a tool error, extract details
+                                                                let tool_name = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                                    if let Some(tool_call) = tool_calls.first() {
+                                                                        tool_call.function.name.clone()
+                                                                    } else {
+                                                                        "unknown".to_string()
+                                                                    }
+                                                                } else {
+                                                                    "unknown".to_string()
+                                                                };
+                                                                
+                                                                let error_message = json_value.get("message")
+                                                                    .and_then(|m| m.as_str())
+                                                                    .unwrap_or("Tool execution failed");
+                                                                
+                                                                let arguments = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                                    if let Some(tool_call) = tool_calls.first() {
+                                                                        match serde_json::from_str(&tool_call.function.arguments) {
+                                                                            Ok(args) => Some(args),
+                                                                            Err(_) => None,
+                                                                        }
+                                                                    } else {
+                                                                        None
+                                                                    }
+                                                                } else {
+                                                                    None
+                                                                };
+                                                                
+                                                                tool_errors.push((tool_name, error_message.to_string(), arguments));
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    response_chunks.push(format!("[Tool result: {}]", tool_response.content));
+                                                }
+                                            }
+                                            StreamedChatResponse::End => {
+                                                // End marker, break the loop
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        return Err(anyhow::anyhow!("Chat error: {}", e));
+                                    }
+                                }
+                            }
+                            None => {
+                                // Stream ended
+                                break;
+                            }
+                        }
+                    }
+                    // Check for WebSocket messages (interrupt requests)
+                                    ws_message = ws_stream.next() => {
+                        match ws_message {
+                            Some(Ok(message)) => {
+                                match message {
+                                    Message::Text(text) => {
+                                        info!("Received WebSocket message during streaming chat processing: {}", text);
+                                        
+                                        // Try to parse as interrupt request
+                                        if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
+                                            if let InputType::Interrupt = &request.input {
+                                                // Handle interrupt immediately
+                                                cancel_token.cancel();
+                                                info!("Streaming chat interrupted during processing");
+                                                // Return a response indicating interruption
+                                                return Ok(RemoteResponse {
+                                                    request_id: String::new(), // Will be replaced by caller
+                                                    response: super::protocol::ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                    error: None,
+                                                    token_usage: None,
+                                                });
+                                            }
+                                        }
+                                        // If not an interrupt, ignore for now (could queue it for later)
+                                    }
+                                    Message::Binary(data) => {
+                                        // Try to parse binary as JSON string
+                                        if let Ok(text) = String::from_utf8(data) {
+                                            info!("Received binary WebSocket message during streaming chat processing: {}", text);
+                                            
+                                            if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
+                                                if let InputType::Interrupt = &request.input {
+                                                    // Handle interrupt immediately
+                                                    cancel_token.cancel();
+                                                    info!("Streaming chat interrupted during processing");
+                                                    // Return a response indicating interruption
+                                                    return Ok(RemoteResponse {
+                                                        request_id: String::new(), // Will be replaced by caller
+                                                        response: super::protocol::ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                        error: None,
+                                                        token_usage: None,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Message::Ping(data) => {
+                                        // Respond to ping
+                                        let _ = ws_stream.send(Message::Pong(data)).await;
+                                    }
+                                    Message::Pong(_) => {
+                                        // Ignore pong
+                                    }
+                                    Message::Close(_frame) => {
+                                        // Connection closed, cancel chat
+                                        cancel_token.cancel();
+                                        info!("WebSocket closed during streaming chat processing");
+                                        return Err(anyhow::anyhow!("WebSocket connection closed during streaming chat processing"));
+                                    }
+                                    Message::Frame(_) => {
+                                        // Ignore raw frames
+                                    }
+                                }
+                            }
+                            Some(Err(e)) => {
+                                error!("WebSocket error during streaming chat processing: {}", e);
+                                cancel_token.cancel();
+                                return Err(anyhow::anyhow!("WebSocket error: {}", e));
+                            }
+                            None => {
+                                // WebSocket closed
+                                cancel_token.cancel();
+                                info!("WebSocket connection closed during streaming chat processing");
+                                return Err(anyhow::anyhow!("WebSocket connection closed"));
+                            }
+                        }
+                    }
+                }
+            }
+        } // stream is dropped here, releasing the mutable borrow on chat
+        
+        // Check if chat is waiting for tool confirmation
+        if chat.is_waiting_tool_confirmation() {
+            // Get the last tool call from context
+            if let Some(last_msg) = chat.context.last() {
+                if let Some(tool_calls) = &last_msg.tool_calls {
+                    if let Some(tool_call) = tool_calls.first() {
+                        // Parse arguments string to JSON value
+                        let arguments: serde_json::Value = match serde_json::from_str(&tool_call.function.arguments) {
+                            Ok(args) => args,
+                            Err(e) => {
+                                // If parsing fails, create an empty object
+                                warn!("Failed to parse tool arguments as JSON: {}", e);
+                                serde_json::json!({})
+                            }
+                        };
+                        
+                        // Return a tool confirmation request
+                        return Ok(RemoteResponse {
+                            request_id: String::new(), // Will be replaced by caller
+                            response: super::protocol::ResponseContent::ToolConfirmationRequest {
+                                name: tool_call.function.name.clone(),
+                                arguments,
+                                description: None,
+                            },
+                            error: None,
+                            token_usage: None,
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Get token usage from last message if available (after stream is consumed and dropped)
+        let token_usage = chat.context.last().and_then(|last_msg| {
+            last_msg.token_usage.as_ref().map(|usage| super::protocol::TokenUsage {
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens,
+                total_tokens: usage.total_tokens,
+            })
+        });
+        
+        // If there are tool errors, return a tool error response
+        if !tool_errors.is_empty() {
+            // For now, return the first tool error
+            let (tool_name, error_message, arguments) = tool_errors.remove(0);
+            return Ok(RemoteResponse::tool_error(
+                "", // Will be replaced by caller
+                &tool_name,
+                &error_message,
+                arguments,
+            ));
+        }
+        
+        Ok(RemoteResponse {
+            request_id: String::new(), // Will be replaced by caller
+            response: super::protocol::ResponseContent::Stream(response_chunks),
+            error: None,
+            token_usage,
+        })
     }
 }

@@ -46,6 +46,7 @@ impl CommandRegistry {
     }
     
     /// 注册指令
+    #[allow(dead_code)]
     pub fn register(&mut self, command: Box<dyn RemoteCommand>) {
         self.commands.push(command);
     }

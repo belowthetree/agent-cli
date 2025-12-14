@@ -88,6 +88,11 @@ impl Chat {
         self.cancel_token.cancel();
     }
 
+    /// 获取取消令牌的副本，用于在流处理期间取消聊天
+    pub fn get_cancel_token(&self) -> tokio_util::sync::CancellationToken {
+        self.cancel_token.clone()
+    }
+
     pub fn tools(mut self, tools: Vec<McpTool>)->Self {
         info!("设置工具 {}", tools.len());
         self.client.tools(tools);

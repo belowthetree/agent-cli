@@ -91,8 +91,6 @@ pub struct RemoteRequest {
     pub input: InputType,
     /// 可选的配置覆盖
     pub config: Option<RequestConfig>,
-    /// 是否流式传输响应
-    pub stream: Option<bool>,
     /// 是否使用工具
     pub use_tools: Option<bool>,
 }

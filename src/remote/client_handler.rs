@@ -7,7 +7,7 @@ use futures::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio::net::TcpStream;
-use log::{info, error};
+use log::{info, error, warn};
 
 use super::protocol::{RemoteRequest, RemoteResponse, InputType};
 use super::commands::global_registry;
@@ -139,6 +139,11 @@ impl ClientHandler {
             return self.handle_regenerate(&request.request_id).await;
         }
         
+        // Handle ToolConfirmationResponse request
+        if let InputType::ToolConfirmationResponse { name, arguments, approved, reason } = &request.input {
+            return self.handle_tool_confirmation(&request.request_id, name, arguments, *approved, reason.as_deref()).await;
+        }
+        
         // Extract text from input
         let input_text = request.input.to_text();
         
@@ -211,6 +216,7 @@ impl ClientHandler {
         use futures::StreamExt;
         
         let mut response_text = String::new();
+        let mut tool_errors = Vec::new();
         
         // Consume the stream in an inner scope to ensure it's dropped before accessing chat.context
         {
@@ -236,6 +242,43 @@ impl ClientHandler {
                             }
                             StreamedChatResponse::ToolResponse(tool_response) => {
                                 if !tool_response.content.is_empty() {
+                                    // Check if the tool response contains an error
+                                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&tool_response.content) {
+                                        if let Some(error_field) = json_value.get("error") {
+                                            if error_field == true {
+                                                // This is a tool error, extract details
+                                                let tool_name = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                    if let Some(tool_call) = tool_calls.first() {
+                                                        tool_call.function.name.clone()
+                                                    } else {
+                                                        "unknown".to_string()
+                                                    }
+                                                } else {
+                                                    "unknown".to_string()
+                                                };
+                                                
+                                                let error_message = json_value.get("message")
+                                                    .and_then(|m| m.as_str())
+                                                    .unwrap_or("Tool execution failed");
+                                                
+                                                let arguments = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                    if let Some(tool_call) = tool_calls.first() {
+                                                        match serde_json::from_str(&tool_call.function.arguments) {
+                                                            Ok(args) => Some(args),
+                                                            Err(_) => None,
+                                                        }
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                };
+                                                
+                                                tool_errors.push((tool_name, error_message.to_string(), arguments));
+                                            }
+                                        }
+                                    }
+                                    
                                     response_text.push_str(&format!("[Tool result: {}] ", tool_response.content));
                                 }
                             }
@@ -251,6 +294,38 @@ impl ClientHandler {
             }
         } // stream is dropped here, releasing the mutable borrow on chat
         
+        // Check if chat is waiting for tool confirmation
+        if chat.is_waiting_tool_confirmation() {
+            // Get the last tool call from context
+            if let Some(last_msg) = chat.context.last() {
+                if let Some(tool_calls) = &last_msg.tool_calls {
+                    if let Some(tool_call) = tool_calls.first() {
+                        // Parse arguments string to JSON value
+                        let arguments: serde_json::Value = match serde_json::from_str(&tool_call.function.arguments) {
+                            Ok(args) => args,
+                            Err(e) => {
+                                // If parsing fails, create an empty object
+                                warn!("Failed to parse tool arguments as JSON: {}", e);
+                                serde_json::json!({})
+                            }
+                        };
+                        
+                        // Return a tool confirmation request
+                        return Ok(RemoteResponse {
+                            request_id: String::new(), // Will be replaced by caller
+                            response: super::protocol::ResponseContent::ToolConfirmationRequest {
+                                name: tool_call.function.name.clone(),
+                                arguments,
+                                description: None,
+                            },
+                            error: None,
+                            token_usage: None,
+                        });
+                    }
+                }
+            }
+        }
+        
         // Get token usage from last message if available (after stream is consumed and dropped)
         let token_usage = chat.context.last().and_then(|last_msg| {
             last_msg.token_usage.as_ref().map(|usage| super::protocol::TokenUsage {
@@ -259,6 +334,18 @@ impl ClientHandler {
                 total_tokens: usage.total_tokens,
             })
         });
+        
+        // If there are tool errors, return a tool error response
+        if !tool_errors.is_empty() {
+            // For now, return the first tool error
+            let (tool_name, error_message, arguments) = tool_errors.remove(0);
+            return Ok(RemoteResponse::tool_error(
+                "", // Will be replaced by caller
+                &tool_name,
+                &error_message,
+                arguments,
+            ));
+        }
         
         Ok(RemoteResponse {
             request_id: String::new(), // Will be replaced by caller
@@ -276,6 +363,7 @@ impl ClientHandler {
         use futures::StreamExt;
         
         let mut response_chunks = Vec::new();
+        let mut tool_errors = Vec::new();
         
         // Consume the stream in an inner scope to ensure it's dropped before accessing chat.context
         {
@@ -300,6 +388,43 @@ impl ClientHandler {
                             }
                             StreamedChatResponse::ToolResponse(tool_response) => {
                                 if !tool_response.content.is_empty() {
+                                    // Check if the tool response contains an error
+                                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&tool_response.content) {
+                                        if let Some(error_field) = json_value.get("error") {
+                                            if error_field == true {
+                                                // This is a tool error, extract details
+                                                let tool_name = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                    if let Some(tool_call) = tool_calls.first() {
+                                                        tool_call.function.name.clone()
+                                                    } else {
+                                                        "unknown".to_string()
+                                                    }
+                                                } else {
+                                                    "unknown".to_string()
+                                                };
+                                                
+                                                let error_message = json_value.get("message")
+                                                    .and_then(|m| m.as_str())
+                                                    .unwrap_or("Tool execution failed");
+                                                
+                                                let arguments = if let Some(tool_calls) = &tool_response.tool_calls {
+                                                    if let Some(tool_call) = tool_calls.first() {
+                                                        match serde_json::from_str(&tool_call.function.arguments) {
+                                                            Ok(args) => Some(args),
+                                                            Err(_) => None,
+                                                        }
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                };
+                                                
+                                                tool_errors.push((tool_name, error_message.to_string(), arguments));
+                                            }
+                                        }
+                                    }
+                                    
                                     response_chunks.push(format!("[Tool result: {}]", tool_response.content));
                                 }
                             }
@@ -315,6 +440,38 @@ impl ClientHandler {
             }
         } // stream is dropped here, releasing the mutable borrow on chat
         
+        // Check if chat is waiting for tool confirmation
+        if chat.is_waiting_tool_confirmation() {
+            // Get the last tool call from context
+            if let Some(last_msg) = chat.context.last() {
+                if let Some(tool_calls) = &last_msg.tool_calls {
+                    if let Some(tool_call) = tool_calls.first() {
+                        // Parse arguments string to JSON value
+                        let arguments: serde_json::Value = match serde_json::from_str(&tool_call.function.arguments) {
+                            Ok(args) => args,
+                            Err(e) => {
+                                // If parsing fails, create an empty object
+                                warn!("Failed to parse tool arguments as JSON: {}", e);
+                                serde_json::json!({})
+                            }
+                        };
+                        
+                        // Return a tool confirmation request
+                        return Ok(RemoteResponse {
+                            request_id: String::new(), // Will be replaced by caller
+                            response: super::protocol::ResponseContent::ToolConfirmationRequest {
+                                name: tool_call.function.name.clone(),
+                                arguments,
+                                description: None,
+                            },
+                            error: None,
+                            token_usage: None,
+                        });
+                    }
+                }
+            }
+        }
+        
         // Get token usage from last message if available (after stream is consumed and dropped)
         let token_usage = chat.context.last().and_then(|last_msg| {
             last_msg.token_usage.as_ref().map(|usage| super::protocol::TokenUsage {
@@ -323,6 +480,18 @@ impl ClientHandler {
                 total_tokens: usage.total_tokens,
             })
         });
+        
+        // If there are tool errors, return a tool error response
+        if !tool_errors.is_empty() {
+            // For now, return the first tool error
+            let (tool_name, error_message, arguments) = tool_errors.remove(0);
+            return Ok(RemoteResponse::tool_error(
+                "", // Will be replaced by caller
+                &tool_name,
+                &error_message,
+                arguments,
+            ));
+        }
         
         Ok(RemoteResponse {
             request_id: String::new(), // Will be replaced by caller
@@ -485,6 +654,103 @@ impl ClientHandler {
             }
         } else {
             RemoteResponse::error(request_id, "No chat session found to regenerate")
+        }
+    }
+
+    /// 处理工具确认响应。
+    async fn handle_tool_confirmation(
+        &mut self,
+        request_id: &str,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+        approved: bool,
+        reason: Option<&str>,
+    ) -> RemoteResponse {
+        info!("Handling tool confirmation response: {} - tool: {}, approved: {}", 
+            request_id, tool_name, approved);
+        
+        if let Some(chat) = &mut self.chat {
+            if chat.is_waiting_tool_confirmation() {
+                // 验证工具名称和参数是否匹配
+                let mut validation_error = None;
+                
+                // 获取等待确认的工具调用
+                if let Some(last_msg) = chat.context.last() {
+                    if let Some(tool_calls) = &last_msg.tool_calls {
+                        if let Some(tool_call) = tool_calls.first() {
+                            // 验证工具名称
+                            if tool_call.function.name != tool_name {
+                                validation_error = Some(format!(
+                                    "Tool name mismatch: expected '{}', got '{}'",
+                                    tool_call.function.name, tool_name
+                                ));
+                            } else {
+                                // 验证参数（可选，因为参数可能被序列化为字符串）
+                                // 尝试解析工具调用中的参数
+                                match serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
+                                    Ok(expected_args) => {
+                                        // 简单比较JSON值是否相等
+                                        if &expected_args != arguments {
+                                            warn!("Tool arguments mismatch for tool '{}'", tool_name);
+                                            // 这里不视为错误，因为参数格式可能不同
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to parse tool arguments for validation: {}", e);
+                                    }
+                                }
+                            }
+                        } else {
+                            validation_error = Some("No tool call found in last message".to_string());
+                        }
+                    } else {
+                        validation_error = Some("No tool calls found in last message".to_string());
+                    }
+                } else {
+                    validation_error = Some("No last message found in chat context".to_string());
+                }
+                
+                // 如果有验证错误，返回错误响应
+                if let Some(error_msg) = validation_error {
+                    return RemoteResponse::error(request_id, &format!("Tool confirmation validation failed: {}", error_msg));
+                }
+                
+                // 设置工具确认结果
+                chat.set_tool_confirmation_result(approved);
+                
+                // 如果有原因，记录下来
+                if let Some(reason) = reason {
+                    info!("Tool confirmation reason: {}", reason);
+                }
+                
+                // 继续处理工具调用
+                let result = if approved {
+                    // 如果批准，继续执行工具
+                    Self::process_non_streaming_chat(chat, "").await
+                } else {
+                    // 如果不批准，返回错误
+                    Ok(RemoteResponse {
+                        request_id: String::new(),
+                        response: super::protocol::ResponseContent::Text(
+                            format!("Tool '{}' execution was not approved by user", tool_name)
+                        ),
+                        error: None,
+                        token_usage: None,
+                    })
+                };
+                
+                match result {
+                    Ok(mut response) => {
+                        response.request_id = request_id.to_string();
+                        response
+                    }
+                    Err(e) => RemoteResponse::error(request_id, &format!("Tool confirmation processing error: {}", e)),
+                }
+            } else {
+                RemoteResponse::error(request_id, "No pending tool confirmation found")
+            }
+        } else {
+            RemoteResponse::error(request_id, "No active chat session found")
         }
     }
 }

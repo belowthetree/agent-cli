@@ -34,6 +34,13 @@ pub enum InputType {
     Interrupt,
     /// 重新生成最后的回复
     Regenerate,
+    /// 工具确认响应
+    ToolConfirmationResponse {
+        name: String,
+        arguments: serde_json::Value,
+        approved: bool,
+        reason: Option<String>,
+    },
 }
 
 impl InputType {
@@ -58,6 +65,10 @@ impl InputType {
             InputType::GetCommands => "[GetCommands]".to_string(),
             InputType::Interrupt => "[Interrupt]".to_string(),
             InputType::Regenerate => "[Regenerate]".to_string(),
+            InputType::ToolConfirmationResponse { name, arguments, approved, reason } => {
+                format!("[ToolConfirmationResponse: {} with args: {}, approved: {}, reason: {}]", 
+                    name, arguments, approved, reason.as_deref().unwrap_or("none"))
+            },
         }
     }
 }
@@ -130,6 +141,19 @@ pub enum ResponseContent {
         name: String,
         result: serde_json::Value,
     },
+    /// 工具确认请求
+    ToolConfirmationRequest {
+        name: String,
+        arguments: serde_json::Value,
+        description: Option<String>,
+    },
+    /// 工具确认响应
+    ToolConfirmationResponse {
+        name: String,
+        arguments: serde_json::Value,
+        approved: bool,
+        reason: Option<String>,
+    },
 }
 
 /// 令牌使用统计信息。
@@ -149,5 +173,39 @@ impl RemoteResponse {
             error: Some(error.to_string()),
             token_usage: None,
         }
+    }
+
+    /// 创建一个带有详细错误信息的错误响应。
+    pub fn detailed_error(request_id: &str, error_type: &str, error_message: &str, details: Option<serde_json::Value>) -> Self {
+        let error_info = if let Some(details) = details {
+            serde_json::json!({
+                "type": error_type,
+                "message": error_message,
+                "details": details
+            }).to_string()
+        } else {
+            serde_json::json!({
+                "type": error_type,
+                "message": error_message
+            }).to_string()
+        };
+
+        Self {
+            request_id: request_id.to_string(),
+            response: ResponseContent::Text(String::new()),
+            error: Some(error_info),
+            token_usage: None,
+        }
+    }
+
+    /// 创建一个工具调用错误响应。
+    pub fn tool_error(request_id: &str, tool_name: &str, error: &str, arguments: Option<serde_json::Value>) -> Self {
+        let error_details = serde_json::json!({
+            "tool": tool_name,
+            "error": error,
+            "arguments": arguments
+        });
+
+        Self::detailed_error(request_id, "tool_execution_error", &format!("Tool '{}' execution failed", tool_name), Some(error_details))
     }
 }

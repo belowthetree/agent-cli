@@ -550,6 +550,86 @@ main();
 3. **数据加密**: 敏感数据建议在传输前进行加密
 4. **输入验证**: 客户端应对输入数据进行验证
 
+## 工具确认协议
+
+### 工具确认请求
+
+当配置中设置了 `ask_before_tool_execution: true` 时，服务器会在执行工具调用前向客户端发送工具确认请求。客户端需要响应此请求以确认或拒绝工具调用。
+
+#### 工具确认请求格式
+
+```json
+{
+  "request_id": "string",
+  "response": {
+    "ToolConfirmationRequest": {
+      "name": "工具名称",
+      "arguments": {
+        // 工具参数
+      },
+      "description": "可选工具描述"
+    }
+  },
+  "error": null,
+  "token_usage": null
+}
+```
+
+### 工具确认响应
+
+客户端需要发送工具确认响应来批准或拒绝工具调用。
+
+#### 工具确认响应格式
+
+**请求格式:**
+```json
+{
+  "request_id": "string",
+  "input": {
+    "ToolConfirmationResponse": {
+      "name": "工具名称",
+      "arguments": {
+        // 工具参数（应与请求中的参数匹配）
+      },
+      "approved": true,
+      "reason": "可选原因说明"
+    }
+  },
+  "stream": false,
+  "use_tools": true
+}
+```
+
+**参数说明:**
+- `name`: 工具名称，应与请求中的工具名称匹配
+- `arguments`: 工具参数，应与请求中的参数匹配
+- `approved`: 布尔值，true表示批准执行，false表示拒绝执行
+- `reason`: 可选字符串，提供批准或拒绝的原因
+
+### 错误信息增强
+
+#### 结构化错误响应
+
+工具执行错误现在包含更详细的结构化信息：
+
+```json
+{
+  "request_id": "string",
+  "response": {
+    "Text": ""
+  },
+  "error": "{\"type\":\"tool_execution_error\",\"message\":\"Tool 'tool_name' execution failed\",\"details\":{\"tool\":\"tool_name\",\"error\":\"具体错误信息\",\"arguments\":{\"param1\":\"value1\"}}}",
+  "token_usage": null
+}
+```
+
+#### 工具错误响应方法
+
+服务器现在提供 `RemoteResponse::tool_error()` 方法创建工具错误响应，包含：
+- 错误类型: `tool_execution_error`
+- 错误消息: 描述性错误信息
+- 详细信息: 包含工具名称、具体错误信息和工具参数
+
 ## 版本历史
 
 - v1.0.0 (初始版本): 支持基本文本对话和工具调用
@@ -557,6 +637,7 @@ main();
 - v1.2.0: 添加多种输入类型支持（图像、文件、指令等）
 - v1.3.0: 协议从 TCP 迁移到 WebSocket，提供更好的双向通信支持
 - v1.4.0: 添加获取内置指令列表功能（GetCommands），允许远端客户端查询TUI斜杠命令
+- v1.5.0: 添加工具确认协议和增强的错误信息传递
 
 ## 支持与反馈
 

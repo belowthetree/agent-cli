@@ -141,6 +141,15 @@ impl Chat {
         self.waiting_tool_confirmation = false;
     }
 
+    /// 设置工具确认结果
+    pub fn set_tool_confirmation_result(&mut self, approved: bool) {
+        if approved {
+            self.confirm_tool_call();
+        } else {
+            self.reject_tool_call();
+        }
+    }
+
     // 用已有的上下文再次发送给模型，用于突然中断的情况
     pub fn stream_rechat(&mut self) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
         let mut tools= Vec::new();

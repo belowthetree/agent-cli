@@ -126,7 +126,7 @@ impl ClientHandler {
         
         // Handle Instruction request
         if let InputType::Instruction { command, parameters } = &request.input {
-            return Self::handle_instruction(&request.request_id, command, parameters, &self.config).await;
+            return self.handle_instruction(&request.request_id, command, parameters).await;
         }
         
         // Handle Interrupt request
@@ -535,10 +535,10 @@ impl ClientHandler {
 
     /// 处理指令请求。
     async fn handle_instruction(
+        &mut self,
         request_id: &str,
         command: &str,
         parameters: &serde_json::Value,
-        base_config: &Config,
     ) -> RemoteResponse {
         info!("Handling instruction request: {} - command: {}", request_id, command);
         
@@ -556,11 +556,22 @@ impl ClientHandler {
             }
         };
         
-        // 创建聊天实例
-        let mut chat = Chat::new(base_config.clone());
+        // 使用现有的聊天实例或创建新的
+        let chat = match &mut self.chat {
+            Some(chat) => {
+                // 使用现有的聊天实例
+                chat
+            }
+            None => {
+                // 创建新的聊天实例
+                let chat = Chat::new(self.config.clone());
+                self.chat = Some(chat);
+                self.chat.as_mut().unwrap()
+            }
+        };
         
         // 执行指令
-        match cmd.execute(&mut chat, parameters.clone()).await {
+        match cmd.execute(chat, parameters.clone()).await {
             Ok(result) => {
                 RemoteResponse {
                     request_id: request_id.to_string(),

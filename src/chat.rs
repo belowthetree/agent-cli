@@ -1,7 +1,6 @@
 use std::cmp::max;
 
-use async_stream::stream;
-use futures::{Stream, StreamExt, pin_mut};
+use futures::Stream;
 use log::info;
 
 use crate::config::{self, Config};
@@ -152,16 +151,6 @@ impl Chat {
         self.state.is_waiting_tool()
     }
 
-    /// 检查是否需要询问用户确认工具调用
-    pub fn should_ask_for_tool_confirmation(&self) -> bool {
-        self.state.should_ask_for_tool_confirmation()
-    }
-
-    /// 设置等待工具确认状态
-    pub fn set_waiting_tool_confirmation(&mut self, waiting: bool) {
-        self.state.set_waiting_tool_confirmation(waiting);
-    }
-
     /// 检查是否正在等待工具确认
     pub fn is_waiting_tool_confirmation(&self) -> bool {
         self.state.is_waiting_tool_confirmation()
@@ -184,131 +173,14 @@ impl Chat {
 
     // 用已有的上下文再次发送给模型，用于突然中断的情况
     pub fn stream_rechat(&mut self) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        // 刷新消息缓冲区，确保所有消息都在上下文中
-        self.state.flush_message_buffer();
-        
-        let mut tools = Vec::new();
-        if let Some(last) = self.state.context().last() {
-            if let Some(calls) = &last.tool_calls {
-                for tool in calls {
-                    tools.push(tool.clone());
-                }
-            }
-        }
-        stream! {
-            info!("stream_rechat 工具数 {:?}", tools);
-            let mut tool_responses = Vec::new();
-            {
-                let stream = self.call_tool(tools);
-                pin_mut!(stream);
-                while let Some(res) = stream.next().await {
-                    match res {
-                        Ok(res) => {
-                            yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
-                            tool_responses.push(res);
-                        }
-                        Err(e) => {
-                            yield Err(e);
-                        }
-                    }
-                    if self.state.get_cancel_token().is_cancelled() {
-                        break;
-                    }
-                }
-            }
-            for response in tool_responses {
-                self.state.add_message(response);
-            }
-            let stream = self.handle_stream_chat();
-            pin_mut!(stream);
-            while let Some(res) = stream.next().await {
-                yield res;
-            }
-        }
+        chat_stream::ChatStream::handle_rechat(&mut self.state)
     }
 
-    pub fn chat(&mut self, prompt: &str) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        self.state.add_message(ModelMessage::user(prompt.to_string()));
-        let cancel_token = self.state.get_cancel_token();
-        self.state.lock();
-        stream! {
-            let mut count = self.state.max_tool_try();
-            loop {
-                // 刷新消息缓冲区，确保所有消息都在上下文中
-                self.state.flush_message_buffer();
-                
-                let mut msg = ModelMessage::assistant("", "", vec![]);
-                {
-                    let stream = self.state.client().chat2(self.state.context().to_vec());
-                    pin_mut!(stream);
-                    while let Some(res) = stream.next().await {
-                        // 检查是否已取消
-                        if cancel_token.is_cancelled() {
-                            break;
-                        }
-                        info!("{:?}", res);
-                    match res {
-                        Ok(mut res) => {
-                            if res.content.len() > 0 {
-                                msg.add_content(res.content.clone());
-                                yield Ok(StreamedChatResponse::Text(res.content.to_string()));
-                            }
-                            if res.think.len() > 0 {
-                                msg.add_think(res.think.clone());
-                                yield Ok(StreamedChatResponse::Reasoning(res.think.to_string()));
-                            }
-                            if let Some(tools) = res.tool_calls {
-                                for tool in tools {
-                                    msg.add_tool(tool.clone());
-                                    yield Ok(StreamedChatResponse::ToolCall(tool));
-                                }
-                            }
-                            // 保存token使用情况
-                            if let Some(usage) = &res.token_usage {
-                                // 先检查token限制（借用）
-                                if self.state.check_token_limit(Some(usage)) {
-                                    // 超过限制，停止生成
-                                    break;
-                                }
-                                // 然后移动值
-                                msg.token_usage = res.token_usage.take();
-                            }
-                        },
-                            Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
-                        }
-                    }
-                    yield Ok(StreamedChatResponse::End);
-                }
-                self.state.add_message(msg.clone());
-                if msg.tool_calls.is_some() && count > 0 {
-                    count -= 1;
-                    let tool_calls = msg.tool_calls.unwrap();
-                    let mut tool_responses = Vec::new();
-                    {
-                        let stream = self.call_tool(tool_calls);
-                        pin_mut!(stream);
-                while let Some(res) = stream.next().await {
-                    match res {
-                        Ok(res) => {
-                            yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
-                            tool_responses.push(res);
-                        }
-                                Err(e) => {
-                                    yield Err(e);
-                                }
-                            }
-                        }
-                    }
-                    for response in tool_responses {
-                        self.state.add_message(response);
-                    }
-                }
-                else {
-                    break;
-                }
-            }
-            self.state.unlock();
-        }
+    pub fn chat<'a, 'b>(&'a mut self, prompt: &'b str) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a 
+    where
+        'b: 'a,
+    {
+        chat_stream::ChatStream::handle_chat(&mut self.state, prompt)
     }
 
     pub fn stream_chat(
@@ -316,121 +188,11 @@ impl Chat {
         prompt: &str,
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
         self.state.add_message(ModelMessage::user(prompt.to_string()));
-        self.handle_stream_chat()
-    }
-
-    pub fn handle_stream_chat(&mut self)-> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        let cancel_token = self.state.get_cancel_token();
-        self.state.lock();
-        stream! {
-            let mut count = self.state.max_tool_try();
-            loop {
-                // 刷新消息缓冲区，确保所有消息都在上下文中
-                self.state.flush_message_buffer();
-                
-                let mut msg = ModelMessage::assistant("", "", vec![]);
-                {
-                    let stream = self.state.client().stream_chat(self.state.context().to_vec());
-                    pin_mut!(stream);
-                    // 接收模型输出
-                    while let Some(res) = stream.next().await {
-                        // 检查是否已取消
-                        if cancel_token.is_cancelled() {
-                            break;
-                        }
-                        info!("{:?}", res);
-                        match res {
-                            Ok(mut res) => {
-                        if res.content.len() > 0 {
-                            msg.add_content(res.content.clone());
-                            yield Ok(StreamedChatResponse::Text(res.content.to_string()));
-                        }
-                        if res.think.len() > 0 {
-                            msg.add_think(res.think.clone());
-                            yield Ok(StreamedChatResponse::Reasoning(res.think.to_string()));
-                        }
-                                if let Some(tools) = res.tool_calls {
-                                    for tool in tools {
-                                        msg.add_tool(tool.clone());
-                                        yield Ok(StreamedChatResponse::ToolCall(tool));
-                                    }
-                                }
-                                // 保存token使用情况
-                                if let Some(usage) = &res.token_usage {
-                                    // 先检查token限制（借用）
-                                    if self.state.check_token_limit(Some(usage)) {
-                                        // 超过限制，停止生成
-                                        break;
-                                    }
-                                    // 然后移动值
-                                    msg.token_usage = res.token_usage.take();
-                                }
-                            },
-                            Err(e) => yield Err(anyhow::anyhow!(e.to_string())),
-                        }
-                    }
-                }
-                yield Ok(StreamedChatResponse::End);
-                self.state.add_message(msg.clone());
-                // 处理工具调用
-                info!("工具数 {:?}", msg.tool_calls);
-                if msg.tool_calls.is_some() && count > 0 {
-                    count -= 1;
-                    let tool_calls = msg.tool_calls.unwrap();
-                    
-                    // 检查是否需要询问用户确认
-                    if self.should_ask_for_tool_confirmation() {
-                        // 设置等待确认状态
-                        self.set_waiting_tool_confirmation(true);
-                        // 不执行工具调用，等待用户确认
-                        break;
-                    } else {
-                        // 不需要询问，直接执行工具调用
-                        let mut tool_responses = Vec::new();
-                        {
-                            let stream = self.call_tool(tool_calls);
-                            pin_mut!(stream);
-                            while let Some(res) = stream.next().await {
-                                match res {
-                                    Ok(res) => {
-                                        yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
-                                        tool_responses.push(res);
-                                    }
-                                    Err(e) => {
-                                        yield Err(e);
-                                    }
-                                }
-                            }
-                        }
-                        for response in tool_responses {
-                            self.state.add_message(response);
-                        }
-                    }
-                }
-                else {
-                    break;
-                }
-            }
-            self.state.unlock();
-        }
+        chat_stream::ChatStream::handle_stream_chat(&mut self.state)
     }
 
     pub fn call_tool(&self, tool_calls: Vec<ToolCall>)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {
-        let cancel_token = self.state.get_cancel_token();
-        stream! {
-            if tool_calls.is_empty() {
-                return;
-            }
-            let caller = crate::client::tool_client::ToolClient;
-            let stream = caller.call(tool_calls);
-            pin_mut!(stream);
-            while let Some(res) = stream.next().await {
-                if cancel_token.is_cancelled() {
-                    return;
-                }
-                yield res;
-            }
-        }
+        chat_tools::ChatTools::call_tool(tool_calls, self.state.get_cancel_token())
     }
 
     pub fn add_message(&mut self, msg: ModelMessage) {

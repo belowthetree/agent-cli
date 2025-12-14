@@ -53,7 +53,8 @@ impl NapCatClient {
                 onebot_v11::Event::Message(message) => match message {
                     onebot_v11::event::message::Message::PrivateMessage(private_msg) => {
                         if self.config.is_target_user(private_msg.user_id) {
-                            let stream = self.chat.chat(&get_text_msg(private_msg.message));
+                            let prompt = get_text_msg(private_msg.message);
+                            let stream = self.chat.chat(&prompt);
                             match get_output_tostring(stream).await {
                                 Ok(response) => {
                                     let payload =
@@ -72,7 +73,8 @@ impl NapCatClient {
                     }
                     onebot_v11::event::message::Message::GroupMessage(group_message) => {
                         if self.config.is_group_at_self(group_message.clone()) {
-                            let stream = self.chat.chat(&get_text_msg(group_message.message));
+                            let prompt = get_text_msg(group_message.message);
+                            let stream = self.chat.chat(&prompt);
                             match get_output_tostring(stream).await {
                                 Ok(response) => {
                                     let payload = ApiPayload::SendGroupForwardMsg(SendGroupForwardMsg {

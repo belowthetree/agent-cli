@@ -23,10 +23,6 @@ pub struct ChatState {
     max_context_num: usize,
     /// 是否正在等待对话轮次确认
     waiting_context_confirmation: bool,
-    /// 消息批处理缓冲区
-    message_buffer: Vec<ModelMessage>,
-    /// 批处理大小阈值
-    batch_size_threshold: usize,
 }
 
 impl ChatState {
@@ -51,8 +47,6 @@ impl ChatState {
             conversation_turn_count: 0,
             max_context_num,
             waiting_context_confirmation: false,
-            message_buffer: Vec::new(),
-            batch_size_threshold: 5, // 默认批处理大小为5条消息
         }
     }
 
@@ -132,44 +126,7 @@ impl ChatState {
 
     /// 添加消息到上下文（支持批处理）
     pub fn add_message(&mut self, msg: ModelMessage) {
-        self.message_buffer.push(msg);
-        
-        // 如果缓冲区达到阈值，刷新到上下文
-        if self.message_buffer.len() >= self.batch_size_threshold {
-            self.flush_message_buffer();
-        }
-    }
-    
-    /// 批量添加消息到上下文
-    pub fn add_messages(&mut self, messages: Vec<ModelMessage>) {
-        self.message_buffer.extend(messages);
-        
-        // 如果缓冲区达到阈值，刷新到上下文
-        if self.message_buffer.len() >= self.batch_size_threshold {
-            self.flush_message_buffer();
-        }
-    }
-    
-    /// 强制刷新消息缓冲区到上下文
-    pub fn flush_message_buffer(&mut self) {
-        if !self.message_buffer.is_empty() {
-            self.context.extend(self.message_buffer.drain(..));
-        }
-    }
-    
-    /// 设置批处理大小阈值
-    pub fn set_batch_size_threshold(&mut self, threshold: usize) {
-        self.batch_size_threshold = threshold;
-    }
-    
-    /// 获取当前批处理缓冲区大小
-    pub fn buffer_size(&self) -> usize {
-        self.message_buffer.len()
-    }
-    
-    /// 获取批处理大小阈值
-    pub fn batch_size_threshold(&self) -> usize {
-        self.batch_size_threshold
+        self.context.push(msg);
     }
 
     /// 增加对话轮次计数
@@ -246,10 +203,5 @@ impl ChatState {
     /// 获取客户端
     pub fn client(&self) -> &ChatClient {
         &self.client
-    }
-
-    /// 获取可变的客户端
-    pub fn client_mut(&mut self) -> &mut ChatClient {
-        &mut self.client
     }
 }

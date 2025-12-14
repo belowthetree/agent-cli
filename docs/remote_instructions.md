@@ -32,18 +32,7 @@
 
 ## 内置指令
 
-### clear_context
-
-**描述**: 清理聊天上下文，重置对话轮次
-
-**参数**: 无
-
-**功能**:
-1. 重置对话轮次计数器
-2. 清理所有聊天消息
-3. 保留系统消息（如果存在）
-
-**响应**: "上下文已清理，对话轮次已重置"
+目前没有内置指令。所有功能都通过协议变体实现。如需添加新功能，请参考"添加新指令"部分。
 
 ## 使用方法
 
@@ -66,14 +55,14 @@ cargo run -- remote start
 }
 ```
 
-#### 执行指令
+#### 执行指令（示例）
 
 ```json
 {
   "request_id": "test_2",
   "input": {
     "type": "instruction",
-    "command": "clear_context",
+    "command": "your_command",
     "parameters": {}
   }
 }
@@ -99,12 +88,12 @@ async def execute_command():
         response = await websocket.recv()
         print("可用指令:", response)
         
-        # 执行清理上下文指令
+        # 执行自定义指令（示例）
         request = {
-            "request_id": "clear_ctx",
+            "request_id": "custom_cmd",
             "input": {
                 "type": "instruction",
-                "command": "clear_context",
+                "command": "your_command",
                 "parameters": {}
             }
         }
@@ -151,9 +140,8 @@ pub fn init_global_registry() -> &'static CommandRegistry {
     COMMAND_REGISTRY.get_or_init(|| {
         let mut registry = CommandRegistry::new();
         
-        // 注册默认指令
-        registry.register(Box::new(ClearContextCommand));
-        registry.register(Box::new(YourCommand)); // 添加这一行
+        // 注册新指令
+        registry.register(Box::new(YourCommand));
         
         registry
     })

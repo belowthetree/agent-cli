@@ -67,16 +67,16 @@ use std::sync::OnceLock;
 static COMMAND_REGISTRY: OnceLock<CommandRegistry> = OnceLock::new();
 
 /// 初始化全局指令注册器
-pub fn init_global_registry() -> &'static CommandRegistry {
-    COMMAND_REGISTRY.get_or_init(|| {
-        let mut registry = CommandRegistry::new();
-        
-        // 注册默认指令
-        registry.register(Box::new(ClearContextCommand));
-        
-        registry
-    })
-}
+    pub fn init_global_registry() -> &'static CommandRegistry {
+        COMMAND_REGISTRY.get_or_init(|| {
+            let registry = CommandRegistry::new();
+            
+            // 注册默认指令
+            // 注意：clear_context 指令已移除，现在通过 ClearContext 协议变体实现
+            
+            registry
+        })
+    }
 
 /// 获取全局指令注册器
 pub fn global_registry() -> &'static CommandRegistry {
@@ -85,32 +85,4 @@ pub fn global_registry() -> &'static CommandRegistry {
 
 // ========== 具体指令实现 ==========
 
-/// 清理上下文指令
-#[derive(Debug)]
-pub struct ClearContextCommand;
-
-#[async_trait]
-impl RemoteCommand for ClearContextCommand {
-    fn name(&self) -> &'static str {
-        "clear_context"
-    }
-    
-    fn description(&self) -> &'static str {
-        "清理聊天上下文，重置对话轮次"
-    }
-    
-    async fn execute(&self, chat: &mut Chat, _parameters: Value) -> Result<String, String> {
-        // 重置对话轮次
-        chat.reset_conversation_turn();
-        
-        // 清理上下文（保留系统消息）
-        let system_message = chat.context.first().cloned();
-        chat.context.clear();
-        
-        if let Some(sys_msg) = system_message {
-            chat.context.push(sys_msg);
-        }
-        
-        Ok("上下文已清理，对话轮次已重置".to_string())
-    }
-}
+// 注意：ClearContextCommand 已移除，现在通过 InputType::ClearContext 协议变体实现

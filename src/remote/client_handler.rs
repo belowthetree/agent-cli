@@ -139,6 +139,11 @@ impl ClientHandler {
             return self.handle_regenerate(&request.request_id).await;
         }
         
+        // Handle ClearContext request
+        if let InputType::ClearContext = &request.input {
+            return self.handle_clear_context(&request.request_id).await;
+        }
+        
         // Handle ToolConfirmationResponse request
         if let InputType::ToolConfirmationResponse { name, arguments, approved, reason } = &request.input {
             return self.handle_tool_confirmation(&request.request_id, name, arguments, *approved, reason.as_deref()).await;
@@ -762,6 +767,35 @@ impl ClientHandler {
             }
         } else {
             RemoteResponse::error(request_id, "No active chat session found")
+        }
+    }
+
+    /// 处理清理上下文请求。
+    async fn handle_clear_context(&mut self, request_id: &str) -> RemoteResponse {
+        info!("Handling clear context request: {}", request_id);
+        
+        if let Some(chat) = &mut self.chat {
+            // 重置对话轮次
+            chat.reset_conversation_turn();
+            
+            // 清理上下文（保留系统消息）
+            let system_message = chat.context.first().cloned();
+            chat.context.clear();
+            
+            if let Some(sys_msg) = system_message {
+                chat.context.push(sys_msg);
+            }
+            
+            info!("Chat context cleared successfully");
+            
+            RemoteResponse {
+                request_id: request_id.to_string(),
+                response: super::protocol::ResponseContent::Text("上下文已清理，对话轮次已重置".to_string()),
+                error: None,
+                token_usage: None,
+            }
+        } else {
+            RemoteResponse::error(request_id, "No chat session found to clear context")
         }
     }
 }

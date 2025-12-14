@@ -34,6 +34,8 @@ pub enum InputType {
     Interrupt,
     /// 重新生成最后的回复
     Regenerate,
+    /// 清理聊天上下文，重置对话轮次
+    ClearContext,
     /// 工具确认响应
     ToolConfirmationResponse {
         name: String,
@@ -65,6 +67,7 @@ impl InputType {
             InputType::GetCommands => "[GetCommands]".to_string(),
             InputType::Interrupt => "[Interrupt]".to_string(),
             InputType::Regenerate => "[Regenerate]".to_string(),
+            InputType::ClearContext => "[ClearContext]".to_string(),
             InputType::ToolConfirmationResponse { name, arguments, approved, reason } => {
                 format!("[ToolConfirmationResponse: {} with args: {}, approved: {}, reason: {}]", 
                     name, arguments, approved, reason.as_deref().unwrap_or("none"))

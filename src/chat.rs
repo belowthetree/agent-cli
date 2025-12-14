@@ -99,6 +99,11 @@ impl Chat {
         self
     }
 
+    pub fn set_tools(&mut self, tools: Vec<McpTool>) {
+        info!("设置工具 {}", tools.len());
+        self.client.tools(tools);
+    }
+
     #[allow(unused)]
     pub fn max_try(mut self, max_try: usize)->Self {
         self.max_tool_try = max_try;

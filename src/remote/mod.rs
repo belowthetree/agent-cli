@@ -8,6 +8,8 @@ mod server;
 mod client_handler;
 mod protocol;
 mod commands;
+mod handlers;
+mod shared;
 
 pub use server::RemoteServer;
 

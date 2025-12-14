@@ -15,13 +15,13 @@ use super::handlers::HandlerFactory;
 pub struct ClientHandler {
     ws_stream: WebSocketStream<TcpStream>,
     config: Config,
-    chat: Option<Chat>,
+    chat: Chat,
 }
 
 impl ClientHandler {
     /// 创建一个新的客户端处理器。
     pub fn new(ws_stream: WebSocketStream<TcpStream>, config: Config) -> Self {
-        Self { ws_stream, config, chat: None }
+        Self { ws_stream, config: config.clone(), chat: Chat::new(config) }
     }
 
     /// 处理客户端连接。
@@ -141,18 +141,18 @@ impl ClientHandler {
             // Use the specific handler
             handler.handle(
                 request,
-                self.chat.as_mut(),
+                &mut self.chat,
                 &self.config,
-                Some(&mut self.ws_stream),
+                &mut self.ws_stream,
             ).await
         } else {
             // Use the chat handler for general chat requests
             let chat_handler = HandlerFactory::chat_handler();
             chat_handler.handle(
                 request,
-                self.chat.as_mut(),
+                &mut self.chat,
                 &self.config,
-                Some(&mut self.ws_stream),
+                &mut self.ws_stream,
             ).await
         }
     }
@@ -160,22 +160,18 @@ impl ClientHandler {
     /// 处理中断请求。
     fn handle_interrupt(&mut self, request_id: &str) -> RemoteResponse {
         info!("Handling interrupt request: {}", request_id);
-        
-        if let Some(chat) = &self.chat {
-            if chat.is_running() {
-                chat.cancel();
-                info!("Chat interrupted successfully");
-                return RemoteResponse {
-                    request_id: request_id.to_string(),
-                    response: super::protocol::ResponseContent::Text("Model output interrupted successfully".to_string()),
-                    error: None,
-                    token_usage: None,
-                };
-            } else {
-                return RemoteResponse::error(request_id, "No active model output to interrupt");
-            }
+
+        if self.chat.is_running() {
+            self.chat.cancel();
+            info!("Chat interrupted successfully");
+            return RemoteResponse {
+                request_id: request_id.to_string(),
+                response: super::protocol::ResponseContent::Text("Model output interrupted successfully".to_string()),
+                error: None,
+                token_usage: None,
+            };
         } else {
-            return RemoteResponse::error(request_id, "No chat session found to interrupt");
+            return RemoteResponse::error(request_id, "No active model output to interrupt");
         }
     }
 }

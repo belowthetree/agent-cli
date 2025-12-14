@@ -3,16 +3,30 @@ use async_stream::stream;
 use log::{error, info, warn};
 use reqwest::header;
 use serde_json::Value;
+use std::sync::OnceLock;
 use tokio_stream::StreamExt;
 
-use crate::{connection::{CommonConnectionContent, TokenUsage}, model::param::ToolCall};
+use crate::{connection::{CommonConnectionContent, TokenUsage, cache::{get_response_cache, generate_cache_key}}, model::param::ToolCall};
+
+/// 全局 HTTP 客户端，支持连接池
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn get_http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .pool_max_idle_per_host(10) // 每个主机最大空闲连接数
+            .timeout(std::time::Duration::from_secs(30)) // 设置超时时间
+            .build()
+            .expect("Failed to create HTTP client")
+    })
+}
 
 pub struct SseConnection;
 
 impl SseConnection {
     pub fn stream(url: String, key: String, body: String)->impl Stream<Item = Result<CommonConnectionContent, anyhow::Error>> {
         stream! {
-            let client = reqwest::Client::new();
+            let client = get_http_client();
             let response = client.post(url.clone())
                 .header(header::CONTENT_TYPE, "application/json")
                 .header("Authorization", key.clone())
@@ -144,13 +158,23 @@ pub struct DirectConnection;
 
 impl DirectConnection {
     pub async fn request(url: String, key: String, body: String)->Result<Vec<CommonConnectionContent>, anyhow::Error> {
+        // 生成缓存键
+        let cache_key = generate_cache_key(&url, &body);
+        
+        // 检查缓存
+        let cache = get_response_cache();
+        if let Some(cached_response) = cache.get(&cache_key).await {
+            info!("缓存命中: {}", url);
+            return Ok(cached_response);
+        }
+        
         info!("请求 {}", url);
-        let client = reqwest::Client::new();
+        let client = get_http_client();
         let response = client
-            .post(url)
+            .post(url.clone())
             .header(header::CONTENT_TYPE, "application/json")
             .header("Authorization", key)
-            .body(body)
+            .body(body.clone())
             .send()
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -165,6 +189,8 @@ impl DirectConnection {
         let text = response.text().await.unwrap();
         let json: Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!(e))?;
 
+        let mut res = Vec::new();
+        
         if let Some(choices) = json.get("choices") {
             if let Some(first_choice) = choices.get(0) {
                 if let Some(message) = first_choice.get("message") {
@@ -189,19 +215,18 @@ impl DirectConnection {
                         .map(|s| s.to_string());
 
                     let _ = first_choice.get("index").and_then(Value::as_u64);
-                    let mut res = Vec::new();
+                    
                     res.push(CommonConnectionContent::Content(content));
-                    if tool_calls.is_some() {
-                        let tools = tool_calls.unwrap();
+                    if let Some(tools) = tool_calls {
                         for tool in tools.iter() {
                             res.push(CommonConnectionContent::ToolCall(tool.clone()));
                         }
                     }
-                    if reasoning_content.is_some() {
-                        res.push(CommonConnectionContent::Reasoning(reasoning_content.unwrap()));
+                    if let Some(reasoning) = reasoning_content {
+                        res.push(CommonConnectionContent::Reasoning(reasoning));
                     }
-                    if finish_reason.is_some() {
-                        res.push(CommonConnectionContent::FinishReason(finish_reason.unwrap()));
+                    if let Some(finish) = finish_reason {
+                        res.push(CommonConnectionContent::FinishReason(finish));
                     }
                     
                     // 解析 token 使用情况
@@ -210,6 +235,9 @@ impl DirectConnection {
                             res.push(CommonConnectionContent::TokenUsage(token_usage));
                         }
                     }
+                    
+                    // 将响应存入缓存
+                    cache.set(cache_key, res.clone()).await;
                     
                     return Ok(res);
                 }

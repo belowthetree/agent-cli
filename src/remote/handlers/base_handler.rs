@@ -13,9 +13,9 @@ pub trait RequestHandler: Send + Sync {
     async fn handle(
         &self,
         request: RemoteRequest,
-        chat: Option<&mut Chat>,
+        chat: &mut Chat,
         config: &Config,
-        ws_stream: Option<&mut WebSocketStream<TcpStream>>,
+        ws_stream: &mut WebSocketStream<TcpStream>,
     ) -> RemoteResponse;
     
     /// 检查此处理器是否可以处理给定的请求

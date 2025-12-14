@@ -17,9 +17,9 @@ impl RequestHandler for InstructionHandler {
     async fn handle(
         &self,
         request: RemoteRequest,
-        chat: Option<&mut Chat>,
+        chat: &mut Chat,
         _config: &Config,
-        _ws_stream: Option<&mut WebSocketStream<TcpStream>>,
+        _ws_stream: &mut WebSocketStream<TcpStream>,
     ) -> RemoteResponse {
         let InputType::Instruction { command, parameters } = &request.input else {
             return RemoteResponse::error(&request.request_id, "Invalid request type for InstructionHandler");
@@ -40,18 +40,7 @@ impl RequestHandler for InstructionHandler {
                 );
             }
         };
-        
-        // 使用现有的聊天实例或创建新的
-        let chat = match chat {
-            Some(chat) => chat,
-            None => {
-                return RemoteResponse::error(
-                    &request.request_id,
-                    "No chat session available for instruction execution"
-                );
-            }
-        };
-        
+
         // 执行指令
         match cmd.execute(chat, parameters.clone()).await {
             Ok(result) => {

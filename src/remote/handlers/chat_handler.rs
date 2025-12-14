@@ -7,7 +7,7 @@ use crate::chat::Chat;
 use crate::mcp;
 use tokio_tungstenite::WebSocketStream;
 use tokio::net::TcpStream;
-use log::{info, error};
+use log::{info};
 use anyhow::Result;
 
 /// 处理普通聊天请求的处理器
@@ -18,9 +18,9 @@ impl RequestHandler for ChatHandler {
     async fn handle(
         &self,
         request: RemoteRequest,
-        chat: Option<&mut Chat>,
+        chat: &mut Chat,
         config: &Config,
-        ws_stream: Option<&mut WebSocketStream<TcpStream>>,
+        ws_stream: &mut WebSocketStream<TcpStream>,
     ) -> RemoteResponse {
         info!("Handling chat request: {}", request.request_id);
         
@@ -47,39 +47,16 @@ impl RequestHandler for ChatHandler {
             }
         }
         
-        // Get or create chat instance
-        let chat_instance = match chat {
-            Some(chat) => {
-                // Chat already exists, use it
-                // Note: We don't update config for existing chat
-                chat
-            }
-            None => {
-                // This should not happen in normal flow, but handle it gracefully
-                error!("No chat instance provided for chat request");
-                return RemoteResponse::error(
-                    &request.request_id,
-                    "Internal error: No chat instance available"
-                );
-            }
-        };
-        
         // Configure tools if requested
         let use_tools = request.use_tools.unwrap_or(true);
         if use_tools {
             // Ensure tools are configured
-            chat_instance.set_tools(mcp::get_config_tools());
-            chat_instance.set_tools(mcp::get_basic_tools());
+            chat.set_tools(mcp::get_config_tools());
+            chat.set_tools(mcp::get_basic_tools());
         }
         
-        // Process the chat request
-        let result = if let Some(ws_stream) = ws_stream {
-            // Use WebSocket-aware processing
-            self.process_chat_with_ws(ws_stream, chat_instance, &input_text).await
-        } else {
-            // Use simple processing
-            self.process_chat(chat_instance, &input_text).await
-        };
+        // Process the chat request with WebSocket
+        let result = self.process_chat_with_ws(ws_stream, chat, &input_text).await;
         
         match result {
             Ok(mut response) => {
@@ -188,7 +165,7 @@ impl ChatHandler {
         // Check if chat is waiting for tool confirmation
         if chat.is_waiting_tool_confirmation() {
             // Get the last tool call from context
-            if let Some(last_msg) = chat.context.last() {
+            if let Some(last_msg) = chat.context().last() {
                 if let Some(tool_calls) = &last_msg.tool_calls {
                     if let Some(tool_call) = tool_calls.first() {
                         // Parse arguments string to JSON value
@@ -218,7 +195,7 @@ impl ChatHandler {
         }
         
         // Get token usage from last message if available
-        let token_usage = chat.context.last().and_then(|last_msg| {
+        let token_usage = chat.context().last().and_then(|last_msg| {
             last_msg.token_usage.as_ref().map(|usage| crate::remote::protocol::TokenUsage {
                 prompt_tokens: usage.prompt_tokens,
                 completion_tokens: usage.completion_tokens,

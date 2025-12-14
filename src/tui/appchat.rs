@@ -57,7 +57,11 @@ impl AppChat {
         // 更新聊天上下文并解锁
         {
             let mut guard = selfchat.lock().unwrap();
-            guard.context = chat.context;
+            // 清空当前上下文，然后添加所有消息
+            guard.clear_context();
+            for message in chat.context() {
+                guard.add_message(message.clone());
+            }
             // 对话轮次是直接改动的 selfchat，因此无需再更新
             guard.unlock();
         }
@@ -70,12 +74,11 @@ impl AppChat {
         chat: &mut Chat,
     ) {
         if !input.content.is_empty() {
-            chat.context.push(ModelMessage::user(input.content.clone()));
+            chat.add_message(ModelMessage::user(input.content.clone()));
             selfchat
                 .lock()
                 .unwrap()
-                .context
-                .push(ModelMessage::user(input.content.clone()));
+                .add_message(ModelMessage::user(input.content.clone()));
         }
     }
 
@@ -90,19 +93,19 @@ impl AppChat {
     fn handle_stream_error(selfchat: &Arc<Mutex<Chat>>, err: impl std::fmt::Display) {
         error!("Stream response error: {}", err);
         let mut ctx = selfchat.lock().unwrap();
-        ctx.context.push(ModelMessage::assistant(err.to_string(), "".into(), vec![]));
+        ctx.add_message(ModelMessage::assistant(err.to_string(), "", vec![]));
     }
 
     /// 确保上下文中存在一个assistant消息，如果不存在则创建一个
     fn ensure_assistant_message(ctx: &mut std::sync::MutexGuard<'_, Chat>) -> usize {
-        let last_is_assistant = ctx.context.last()
+        let last_is_assistant = ctx.context().last()
             .map(|m| m.role == "assistant")
             .unwrap_or(false);
         
         if !last_is_assistant {
-            ctx.context.push(ModelMessage::assistant("".into(), "".into(), vec![]));
+            ctx.add_message(ModelMessage::assistant("", "", vec![]));
         }
-        ctx.context.len() - 1
+        ctx.context().len() - 1
     }
 
     /// 处理流式响应
@@ -110,25 +113,32 @@ impl AppChat {
         match response {
             StreamedChatResponse::Text(text) => {
                 let mut ctx = selfchat.lock().unwrap();
-                let idx = Self::ensure_assistant_message(&mut ctx);
-                ctx.context[idx].add_content(text);
+                let _idx = Self::ensure_assistant_message(&mut ctx);
+                // 使用 context_mut() 获取可变引用
+                if let Some(last) = ctx.context_mut().last_mut() {
+                    last.add_content(text);
+                }
             }
             StreamedChatResponse::ToolCall(tool_call) => {
                 let mut ctx = selfchat.lock().unwrap();
-                let idx = Self::ensure_assistant_message(&mut ctx);
-                ctx.context[idx].add_tool(tool_call);
+                let _idx = Self::ensure_assistant_message(&mut ctx);
+                if let Some(last) = ctx.context_mut().last_mut() {
+                    last.add_tool(tool_call);
+                }
             }
             StreamedChatResponse::Reasoning(think) => {
                 let mut ctx = selfchat.lock().unwrap();
-                let idx = Self::ensure_assistant_message(&mut ctx);
-                ctx.context[idx].add_think(think);
+                let _idx = Self::ensure_assistant_message(&mut ctx);
+                if let Some(last) = ctx.context_mut().last_mut() {
+                    last.add_think(think);
+                }
             }
             StreamedChatResponse::ToolResponse(tool) => {
                 let mut ctx = selfchat.lock().unwrap();
-                ctx.context.push(tool);
+                ctx.add_message(tool);
             }
             StreamedChatResponse::End => {
-                // End事件表示模型响应完成，此时chat.context中应该已经包含了完整的消息
+                // End事件表示模型响应完成，此时chat.context()中应该已经包含了完整的消息
                 // 包括token_usage信息
                 
                 // 增加对话轮次计数（模型每次回复时增加1）
@@ -189,7 +199,7 @@ impl AppChat {
         // 获取最后一个消息中的工具调用
         let tool_calls = {
             let guard = selfchat.lock().unwrap();
-            if let Some(last) = guard.context.last() {
+            if let Some(last) = guard.context().last() {
                 if let Some(tools) = &last.tool_calls {
                     tools.clone()
                 } else {
@@ -214,7 +224,7 @@ impl AppChat {
                     Ok(tool_response) => {
                         // 添加工具响应到上下文
                         let mut guard = selfchat.lock().unwrap();
-                        guard.context.push(tool_response);
+                        guard.add_message(tool_response);
                         // 发送滚动信号
                         Self::send_scroll_signal(&tx);
                     }

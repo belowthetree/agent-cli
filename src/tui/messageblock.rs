@@ -78,7 +78,7 @@ impl MessageBlock {
     // 从第 start_line 行开始渲染
     pub fn render_block(&self, area: Rect, buf: &mut Buffer, start_line: u16, viewwidth: u16) {
         let block = Block::default()
-            .title(self.message.role.as_str())
+            .title(self.message.role.as_ref())
             .title_bottom(self.get_bottom_content())
             .padding(Padding::ZERO)
             .style(Style::new().light_blue())
@@ -96,7 +96,7 @@ impl MessageBlock {
     }
 
     pub fn get_content(&self)->String {
-        let mut content = self.message.content.clone();
+        let mut content = self.message.content.clone().into_owned();
         if let Some(tools) = &self.message.tool_calls {
             let mut ct = String::new();
             for tool in tools {
@@ -125,7 +125,7 @@ impl Widget for &MessageBlock {
     fn render(self, area: Rect, buf: &mut Buffer)
     where Self: Sized {
         let block = Block::default()
-            .title(self.message.role.as_str())
+            .title(self.message.role.as_ref())
             .title_bottom(self.get_bottom_content())
             .padding(Padding::ZERO)
             .style(Style::new().light_blue())
@@ -146,6 +146,6 @@ impl Widget for &MessageBlock {
 
 impl From<&MessageBlock> for ListItem<'_> {
     fn from(value: &MessageBlock) -> Self {
-        ListItem::new(Line::styled(std::borrow::Cow::Owned(value.message.content.clone()), Style::new().cyan()))
+        ListItem::new(Line::styled(value.message.content.clone().into_owned(), Style::new().cyan()))
     }
 }

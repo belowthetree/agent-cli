@@ -190,7 +190,7 @@ pub async fn process_streaming_chat_with_ws(
     // Check if chat is waiting for tool confirmation
     if chat.is_waiting_tool_confirmation() {
         // Get the last tool call from context
-        if let Some(last_msg) = chat.context.last() {
+        if let Some(last_msg) = chat.context().last() {
             if let Some(tool_calls) = &last_msg.tool_calls {
                 if let Some(tool_call) = tool_calls.first() {
                     // Parse arguments string to JSON value
@@ -220,7 +220,7 @@ pub async fn process_streaming_chat_with_ws(
     }
     
     // Get token usage from last message if available (after stream is consumed and dropped)
-    let token_usage = chat.context.last().and_then(|last_msg| {
+    let token_usage = chat.context().last().and_then(|last_msg| {
         last_msg.token_usage.as_ref().map(|usage| TokenUsage {
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,

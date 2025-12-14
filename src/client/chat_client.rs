@@ -107,19 +107,19 @@ impl ChatClient {
             while let Some(res) = stream_res.next().await {
                 match res {
                     Ok(CommonConnectionContent::Content(text)) => {
-                        yield Ok(ModelMessage::assistant(text, "".into(), vec![]));
+                        yield Ok(ModelMessage::assistant(text, "", vec![]));
                     }
                     Ok(CommonConnectionContent::ToolCall(tool_call)) => {
-                        yield Ok(ModelMessage::assistant("".into(), "".into(), vec![tool_call]));
+                        yield Ok(ModelMessage::assistant("", "", vec![tool_call]));
                     }
                     Ok(CommonConnectionContent::Reasoning(reasoning)) => {
-                        yield Ok(ModelMessage::assistant("".into(), reasoning, vec![]));
+                        yield Ok(ModelMessage::assistant("", reasoning, vec![]));
                     }
                     Ok(CommonConnectionContent::FinishReason(reason)) => {
                         info!("流式聊天完成，原因: {}", reason);
                         // 在流式结束时，如果有token使用信息，发送一条包含token使用信息的消息
                         if let Some(usage) = token_usage {
-                            let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
+                            let mut msg = ModelMessage::assistant("", "", vec![]);
                             msg.token_usage = Some(usage);
                             yield Ok(msg);
                         }
@@ -138,35 +138,5 @@ impl ChatClient {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use futures::{StreamExt, pin_mut};
-    use super::*;
-
-    #[allow(unused)]
-    async fn test_chat_streaming() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ChatClient::new("".to_string(), "https://api.deepseek.com".into(), "deepseek-chat".into(), vec![]);
-        let stream = client.stream_chat(vec![ModelMessage::user("测试消息".into())]);
-        pin_mut!(stream);
-
-        println!("开始接收流式响应:");
-        let mut msg = ModelMessage::assistant("".into(), "".into(), vec![]);
-        while let Some(result) = stream.next().await {
-            if let Ok(res) = result {
-                if msg.think.len() < res.think.len() {
-                    print!("{}", res.think.split_at(msg.think.len()).1);
-                    msg.think = res.think;
-                }
-                if msg.content.len() < res.content.len() {
-                    print!("{}", res.content.split_at(msg.content.len()).1);
-                    msg.content = res.content;
-                }
-            }
-        }
-        println!("\n流式响应结束");
-        Ok(())
     }
 }

@@ -1,16 +1,22 @@
+use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 use rmcp::model::Tool;
 use crate::connection::TokenUsage;
 
+/// 辅助函数用于检查 Cow<'static, str> 是否为空
+fn cow_is_empty(cow: &Cow<'static, str>) -> bool {
+    cow.is_empty()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelMessage {
-    pub role: String,
-    pub content: String,
-    pub think: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub name: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub tool_call_id: String,
+    pub role: Cow<'static, str>,
+    pub content: Cow<'static, str>,
+    pub think: Cow<'static, str>,
+    #[serde(skip_serializing_if = "cow_is_empty")]
+    pub name: Cow<'static, str>,
+    #[serde(skip_serializing_if = "cow_is_empty")]
+    pub tool_call_id: Cow<'static, str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -18,10 +24,10 @@ pub struct ModelMessage {
 }
 
 impl ModelMessage {
-    pub fn user(content: String)->Self {
+    pub fn user<S: Into<Cow<'static, str>>>(content: S) -> Self {
         Self {
             role: "user".into(),
-            content,
+            content: content.into(),
             think: "".into(),
             name: "".into(),
             tool_call_id: "".into(),
@@ -30,12 +36,16 @@ impl ModelMessage {
         }
     }
 
-    pub fn assistant(content: String, think: String, tool_calls: Vec<ToolCall>)->Self {
+    pub fn assistant<S1: Into<Cow<'static, str>>, S2: Into<Cow<'static, str>>>(
+        content: S1,
+        think: S2,
+        tool_calls: Vec<ToolCall>,
+    ) -> Self {
         let tool_calls = if !tool_calls.is_empty() { Some(tool_calls) } else { None };
         Self {
             role: "assistant".into(),
-            content,
-            think: think,
+            content: content.into(),
+            think: think.into(),
             name: "".into(),
             tool_call_id: "".into(),
             tool_calls,
@@ -43,10 +53,10 @@ impl ModelMessage {
         }
     }
 
-    pub fn system(content: String)->Self {
+    pub fn system<S: Into<Cow<'static, str>>>(content: S) -> Self {
         Self {
             role: "system".into(),
-            content,
+            content: content.into(),
             think: "".into(),
             name: "".into(),
             tool_call_id: "".into(),
@@ -55,19 +65,19 @@ impl ModelMessage {
         }
     }
 
-    pub fn tool(content: String, tool: ToolCall)->Self {
+    pub fn tool<S: Into<Cow<'static, str>>>(content: S, tool: ToolCall) -> Self {
         Self {
             role: "tool".into(),
-            content,
+            content: content.into(),
             think: "".into(),
-            name: tool.function.name,
-            tool_call_id: tool.id,
+            name: tool.function.name.into(),
+            tool_call_id: tool.id.into(),
             tool_calls: None,
             token_usage: None,
         }
     }
 
-    pub fn token(token_usage: TokenUsage)->Self {
+    pub fn token(token_usage: TokenUsage) -> Self {
         Self {
             role: "system".into(),
             content: "".into(),
@@ -88,12 +98,28 @@ impl ModelMessage {
         }
     }
 
-    pub fn add_content(&mut self, content: String) {
-        self.content += &content;
+    pub fn add_content<S: Into<Cow<'static, str>>>(&mut self, content: S) {
+        let new_content = content.into();
+        if let Cow::Owned(mut owned) = self.content.clone() {
+            owned.push_str(&new_content);
+            self.content = Cow::Owned(owned);
+        } else {
+            let mut owned = self.content.to_string();
+            owned.push_str(&new_content);
+            self.content = Cow::Owned(owned);
+        }
     }
 
-    pub fn add_think(&mut self, think: String) {
-        self.think += &think;
+    pub fn add_think<S: Into<Cow<'static, str>>>(&mut self, think: S) {
+        let new_think = think.into();
+        if let Cow::Owned(mut owned) = self.think.clone() {
+            owned.push_str(&new_think);
+            self.think = Cow::Owned(owned);
+        } else {
+            let mut owned = self.think.to_string();
+            owned.push_str(&new_think);
+            self.think = Cow::Owned(owned);
+        }
     }
 }
 

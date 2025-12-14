@@ -29,7 +29,7 @@ impl StateManager {
         // 提取需要的信息，然后释放锁
         let (messages, is_waiting_tool, is_waiting_tool_confirmation, is_waiting_context_confirmation, conversation_turn_info) = {
             let ctx = app.chat.lock().unwrap();
-            let messages: Vec<_> = ctx.context.iter().cloned().collect();
+            let messages: Vec<_> = ctx.context().iter().cloned().collect();
             let conversation_turn_info = ctx.get_conversation_turn_info();
             (messages, ctx.is_waiting_tool() && !ctx.is_running(), ctx.is_waiting_tool_confirmation(), ctx.is_waiting_context_confirmation(), conversation_turn_info)
         };

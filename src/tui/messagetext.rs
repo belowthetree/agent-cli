@@ -14,14 +14,14 @@ impl MessageText {
     }
 
     pub fn lines(&'_ self)->Vec<Line<'_>> {
-        vec![Line::styled(std::borrow::Cow::Owned(self.msg.content.clone()), Style::new().cyan())]
+        vec![Line::styled(self.msg.content.clone().into_owned(), Style::new().cyan())]
     }
 }
 
 
 impl From<&MessageText> for Text<'_> {
     fn from(value: &MessageText) -> Self {
-        Text::from(Line::styled(std::borrow::Cow::Owned(value.msg.content.clone()), Style::new().cyan()))
+        Text::from(Line::styled(value.msg.content.clone().into_owned(), Style::new().cyan()))
     }
 }
 
@@ -29,7 +29,7 @@ impl Widget for &MessageText {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized {
-        Line::raw(self.msg.content.as_str())
+        Line::raw(self.msg.content.as_ref())
         .render(area, buf);
     }
 }

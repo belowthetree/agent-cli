@@ -201,12 +201,12 @@ impl App {
     pub fn add_system_message(&mut self, message: &str) {
         use crate::model::param::ModelMessage;
         let mut model_message = ModelMessage::system(message.to_string());
-        model_message.role = "info".to_string(); // 使用特殊角色
+        model_message.role = "info".into(); // 使用特殊角色
         
         // 获取当前聊天上下文中的消息数量，作为插入位置
         let insert_position = {
             let chat = self.chat.lock().unwrap();
-            chat.context.len()
+            chat.context().len()
         };
         
         // 添加到信息消息列表中，不添加到聊天上下文中
@@ -221,12 +221,12 @@ impl App {
     pub fn add_info_message(&mut self, message: &str) {
         use crate::model::param::ModelMessage;
         let mut model_message = ModelMessage::system(message.to_string());
-        model_message.role = "info".to_string(); // 使用特殊角色
+        model_message.role = "info".into(); // 使用特殊角色
         
         // 获取当前聊天上下文中的消息数量，作为插入位置
         let insert_position = {
             let chat = self.chat.lock().unwrap();
-            chat.context.len()
+            chat.context().len()
         };
         
         // 添加到信息消息列表中，不添加到聊天上下文中

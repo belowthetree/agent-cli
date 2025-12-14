@@ -17,9 +17,9 @@ impl RequestHandler for CommandHandler {
     async fn handle(
         &self,
         request: RemoteRequest,
-        _chat: Option<&mut Chat>,
+        _chat: &mut Chat,
         _config: &Config,
-        _ws_stream: Option<&mut WebSocketStream<TcpStream>>,
+        _ws_stream: &mut WebSocketStream<TcpStream>,
     ) -> RemoteResponse {
         info!("Handling GetCommands request: {}", request.request_id);
         

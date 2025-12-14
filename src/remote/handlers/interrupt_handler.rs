@@ -16,27 +16,22 @@ impl RequestHandler for InterruptHandler {
     async fn handle(
         &self,
         request: RemoteRequest,
-        chat: Option<&mut Chat>,
+        chat: &mut Chat,
         _config: &Config,
-        _ws_stream: Option<&mut WebSocketStream<TcpStream>>,
+        _ws_stream: &mut WebSocketStream<TcpStream>,
     ) -> RemoteResponse {
         info!("Handling interrupt request: {}", request.request_id);
-        
-        if let Some(chat) = chat {
-            if chat.is_running() {
-                chat.cancel();
-                info!("Chat interrupted successfully");
-                return RemoteResponse {
-                    request_id: request.request_id,
-                    response: crate::remote::protocol::ResponseContent::Text("Model output interrupted successfully".to_string()),
-                    error: None,
-                    token_usage: None,
-                };
-            } else {
-                return RemoteResponse::error(&request.request_id, "No active model output to interrupt");
-            }
+        if chat.is_running() {
+            chat.cancel();
+            info!("Chat interrupted successfully");
+            return RemoteResponse {
+                request_id: request.request_id,
+                response: crate::remote::protocol::ResponseContent::Text("Model output interrupted successfully".to_string()),
+                error: None,
+                token_usage: None,
+            };
         } else {
-            return RemoteResponse::error(&request.request_id, "No chat session found to interrupt");
+            return RemoteResponse::error(&request.request_id, "No active model output to interrupt");
         }
     }
     

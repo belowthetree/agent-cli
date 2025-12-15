@@ -13,18 +13,23 @@ pub struct AppEvent;
 
 impl AppEvent {
     /// 监听键盘事件并将其发送到事件通道
-    pub fn watch_events(
+    pub async fn watch_events(
         tx: mpsc::Sender<ETuiEvent>,
     ) -> io::Result<()> {
-        match event::read() {
-            Ok(Event::Key(key)) => {
-                if let Err(e) = tx.send(ETuiEvent::KeyEvent(key)) {
-                    error!("Failed to send event: {}", e);
+        loop {
+            match event::read() {
+                Ok(Event::Key(key)) => {
+                    if let Err(e) = tx.send(ETuiEvent::KeyEvent(key)) {
+                        error!("Failed to send event: {}", e);
+                    }
+                    if key.code == KeyCode::Esc {
+                        break;
+                    }
                 }
-            }
-            Ok(_) => {} // 忽略非键盘事件
-            Err(e) => {
-                error!("Failed to read event: {}", e);
+                Ok(_) => {} // 忽略非键盘事件
+                Err(e) => {
+                    error!("Failed to read event: {}", e);
+                }
             }
         }
         Ok(())

@@ -6,6 +6,7 @@ use std::{
 };
 
 use clap::Parser;
+use log::info;
 use ratatui::{
     crossterm::event::KeyEvent, widgets::ScrollbarState, DefaultTerminal, Frame
 };
@@ -16,7 +17,7 @@ use crate::{
     }
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum ETuiEvent {
     KeyEvent(KeyEvent),
     InfoMessage(usize, ModelMessage),
@@ -119,24 +120,27 @@ impl App {
     /// 
     /// 循环持续运行直到用户退出（按ESC键）或发生错误。
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
+        let t = tokio::spawn(
+        AppEvent::watch_events(
+            self.event_tx.clone(),
+        ));
         terminal.draw(|frame| {
             self.render(frame);
         })?;
         loop {
             if let Ok(ev) = self.event_rx.try_recv() {
                 if ev == ETuiEvent::Exit {
+                    info!("收到退出 {:?}", ev);
                     break;
                 } else if ev == ETuiEvent::RefreshUI {
                     terminal.draw(|frame| {
                         self.render(frame);
                     })?;
                 }
-                AppEvent::watch_events(
-                    self.event_tx.clone(),
-                )?;
                 AppEvent::handle_events(&mut self, ev)?;
             }
         }
+        t.abort();
         Ok(())
     }
 

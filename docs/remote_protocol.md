@@ -35,7 +35,7 @@ request = {
     "input": {
         "Text": "你好，请介绍一下这个项目"
     },
-    "stream": false,
+    "": false,
     "use_tools": true
 }
 
@@ -57,7 +57,7 @@ print(response)
   "request_id": "string",          // 请求唯一标识符
   "input": InputType,              // 输入数据
   "config": RequestConfig,         // 可选配置覆盖
-  "stream": boolean,               // 是否流式响应（可选）
+  "": boolean,               // 是否流式响应（可选）
   "use_tools": boolean             // 是否使用工具（可选）
 }
 ```
@@ -202,11 +202,29 @@ print(response)
 #### 2. 流式响应
 ```json
 {
-  "Stream": ["chunk1", "chunk2", "..."]
+  "Stream": "chunk"
 }
 ```
 
-#### 3. 工具调用
+#### 3. 流式响应完成标记
+```json
+{
+  "Complete": {
+    "token_usage": {
+      "prompt_tokens": number,
+      "completion_tokens": number,
+      "total_tokens": number
+    },
+    "interrupted": boolean
+  }
+}
+```
+
+**参数说明:**
+- `token_usage`: 可选字段，包含本次流式响应的令牌使用统计信息。当流正常结束时包含此信息，当流被中断时可能为`null`
+- `interrupted`: 布尔值，表示流是否被用户中断。`true`表示流被用户通过Interrupt请求中断，`false`表示流正常结束
+
+#### 4. 工具调用
 ```json
 {
   "ToolCall": {
@@ -218,7 +236,7 @@ print(response)
 }
 ```
 
-#### 4. 工具结果
+#### 5. 工具结果
 ```json
 {
   "ToolResult": {
@@ -230,7 +248,7 @@ print(response)
 }
 ```
 
-#### 5. 复合响应
+#### 6. 复合响应
 ```json
 {
   "Multi": [
@@ -260,7 +278,6 @@ print(response)
   "input": {
     "Text": "你好，请介绍一下 Rust 语言的特点"
   },
-  "stream": false,
   "use_tools": true
 }
 ```
@@ -281,52 +298,58 @@ print(response)
 }
 ```
 
-### 示例 2: 流式响应
+### 示例 2: 流式响应（包含Complete标记）
 
 **请求:**
 ```json
 {
-  "request_id": "stream_001",
+  "request_id": "_001",
   "input": {
     "Text": "写一个简单的 Rust Hello World 程序"
   },
-  "stream": true,
+  "": true,
   "use_tools": false
 }
 ```
 
-**响应:**
+**流式响应过程:**
+
+1. **流式文本块:**
 ```json
 {
-  "request_id": "stream_001",
+  "request_id": "_001",
   "response": {
-    "Stream": [
-      "fn",
-      " main",
-      "()",
-      " {",
-      "\n    ",
-      "println",
-      "!",
-      "(\"",
-      "Hello",
-      ", ",
-      "World",
-      "!",
-      "\")",
-      ";",
-      "\n",
-      "}"
-    ]
+    "": ["fn", " main", "()", " {", "\n    ", "println", "!", "(\"", "Hello", ", ", "World", "!", "\")", ";", "\n", "}"]
   },
   "error": null,
-  "token_usage": {
-    "prompt_tokens": 15,
-    "completion_tokens": 45,
-    "total_tokens": 60
-  }
+  "token_usage": null
 }
 ```
+
+2. **流式响应完成标记:**
+```json
+{
+  "request_id": "_001",
+  "response": {
+    "Complete": {
+      "token_usage": {
+        "prompt_tokens": 15,
+        "completion_tokens": 45,
+        "total_tokens": 60
+      },
+      "interrupted": false
+    }
+  },
+  "error": null,
+  "token_usage": null
+}
+```
+
+**说明:**
+- 当使用流式响应时，服务器会先发送包含文本块的``响应
+- 当流正常结束时，服务器会发送`Complete`响应，其中包含令牌使用统计信息
+- `interrupted: false`表示流正常结束，没有被中断
+- 客户端可以通过检测`Complete`响应来明确知道流式响应何时结束
 
 ### 示例 3: 带配置的请求
 
@@ -342,7 +365,7 @@ print(response)
     "ask_before_tool_execution": false,
     "prompt": "你是一个代码分析专家，请详细分析代码结构"
   },
-  "stream": false,
+  "": false,
   "use_tools": true
 }
 ```
@@ -354,7 +377,7 @@ print(response)
 {
   "request_id": "commands_001",
   "input": "GetCommands",
-  "stream": false,
+  "": false,
   "use_tools": false
 }
 ```
@@ -456,7 +479,7 @@ async def main():
         response = await client.send_request({
             "request_id": "test_001",
             "input": {"Text": "你好"},
-            "stream": False,
+            "": False,
             "use_tools": True
         })
         print(response)
@@ -533,7 +556,7 @@ async function main() {
         const response = await client.sendRequest({
             request_id: 'test_001',
             input: { Text: 'Hello' },
-            stream: false,
+            : false,
             use_tools: true
         });
         console.log(response);
@@ -608,7 +631,7 @@ main();
       "reason": "可选原因说明"
     }
   },
-  "stream": false,
+  "": false,
   "use_tools": true
 }
 ```
@@ -651,6 +674,7 @@ main();
 - v1.3.0: 协议从 TCP 迁移到 WebSocket，提供更好的双向通信支持
 - v1.4.0: 添加获取内置指令列表功能（GetCommands），允许远端客户端查询TUI斜杠命令
 - v1.5.0: 添加工具确认协议和增强的错误信息传递
+- v1.6.0: 添加流式响应完成标记（Complete），使客户端能够明确知道流式响应何时结束
 
 ## 支持与反馈
 

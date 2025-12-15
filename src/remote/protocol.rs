@@ -129,7 +129,7 @@ pub enum ResponseContent {
     /// 文本响应
     Text(String),
     /// 文本块的流（用于流式响应）
-    Stream(Vec<String>),
+    Stream(String),
     /// 包含多个部分的组合响应
     Multi(Vec<ResponseContent>),
     /// 工具调用信息
@@ -154,6 +154,13 @@ pub enum ResponseContent {
         arguments: serde_json::Value,
         approved: bool,
         reason: Option<String>,
+    },
+    /// 流式响应完成标记
+    StreamComplete {
+        /// 令牌使用统计信息
+        token_usage: Option<TokenUsage>,
+        /// 是否被中断
+        interrupted: bool,
     },
 }
 

@@ -63,10 +63,13 @@ impl RequestHandler for RegenerateHandler {
                     }
                 }
             }
-            
+            let mut str = String::new();
+            for s in response_chunks.iter() {
+                str = str + &s;
+            }
             RemoteResponse {
                 request_id: request.request_id,
-                response: crate::remote::protocol::ResponseContent::Stream(response_chunks),
+                response: crate::remote::protocol::ResponseContent::Stream(str),
                 error: None,
                 token_usage: None,
             }

@@ -17,7 +17,6 @@ pub async fn process_streaming_chat_with_ws(
     input: &str,
     request_id: &str,
 ) -> Result<RemoteResponse> {
-    let mut response_chunks = Vec::new();
     let mut tool_errors = Vec::new();
     
     // Get a copy of the cancel token before creating the stream
@@ -38,26 +37,25 @@ pub async fn process_streaming_chat_with_ws(
                                 Ok(response) => {
                                     match response {
                                         StreamedChatResponse::Text(text) => {
-                                            response_chunks.push(text.clone());
-                                            // 实时发送文本块给客户端
+                                            // 实时发送文本块给客户端（使用 Stream 响应）
                                             let chunk_response = RemoteResponse {
                                                 request_id: request_id.to_string(),
-                                                response: ResponseContent::Text(text),
+                                                response: ResponseContent::Stream(text),
                                                 error: None,
                                                 token_usage: None,
                                             };
                                             if let Ok(json) = serde_json::to_string(&chunk_response) {
+                                                info!("流式 {:?}", json);
                                                 let _ = ws_stream.send(Message::Text(json)).await;
                                             }
                                         }
                                         StreamedChatResponse::Reasoning(think) => {
                                             if !think.is_empty() {
                                                 let formatted = format!("[Reasoning: {}]", think);
-                                                response_chunks.push(formatted.clone());
-                                                // 实时发送推理内容给客户端
+                                                // 实时发送推理内容给客户端（使用 Stream 响应）
                                                 let chunk_response = RemoteResponse {
                                                     request_id: request_id.to_string(),
-                                                    response: ResponseContent::Text(formatted),
+                                                    response: ResponseContent::Stream(formatted),
                                                     error: None,
                                                     token_usage: None,
                                                 };
@@ -68,11 +66,10 @@ pub async fn process_streaming_chat_with_ws(
                                         }
                                         StreamedChatResponse::ToolCall(tool_call) => {
                                             let formatted = format!("[Tool call: {}]", tool_call.function.name);
-                                            response_chunks.push(formatted.clone());
-                                            // 实时发送工具调用信息给客户端
+                                            // 实时发送工具调用信息给客户端（使用 Stream 响应）
                                             let chunk_response = RemoteResponse {
                                                 request_id: request_id.to_string(),
-                                                response: ResponseContent::Text(formatted),
+                                                response: ResponseContent::Stream(formatted),
                                                 error: None,
                                                 token_usage: None,
                                             };
@@ -120,11 +117,10 @@ pub async fn process_streaming_chat_with_ws(
                                                 }
                                                 
                                                 let formatted = format!("[Tool result: {}]", tool_response.content);
-                                                response_chunks.push(formatted.clone());
-                                                // 实时发送工具结果给客户端
+                                                // 实时发送工具结果给客户端（使用 Stream 响应）
                                                 let chunk_response = RemoteResponse {
                                                     request_id: request_id.to_string(),
-                                                    response: ResponseContent::Text(formatted),
+                                                    response: ResponseContent::Stream(formatted),
                                                     error: None,
                                                     token_usage: None,
                                                 };
@@ -167,7 +163,10 @@ pub async fn process_streaming_chat_with_ws(
                                             // Return a response indicating interruption
                                             return Ok(RemoteResponse {
                                                 request_id: String::new(), // Will be replaced by caller
-                                                response: ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                response: ResponseContent::StreamComplete {
+                                                    token_usage: None,
+                                                    interrupted: true,
+                                                },
                                                 error: None,
                                                 token_usage: None,
                                             });
@@ -188,7 +187,10 @@ pub async fn process_streaming_chat_with_ws(
                                                 // Return a response indicating interruption
                                                 return Ok(RemoteResponse {
                                                     request_id: String::new(), // Will be replaced by caller
-                                                    response: ResponseContent::Text("Model output interrupted by user request".to_string()),
+                                                    response: ResponseContent::StreamComplete {
+                                                        token_usage: None,
+                                                        interrupted: true,
+                                                    },
                                                     error: None,
                                                     token_usage: None,
                                                 });
@@ -284,12 +286,15 @@ pub async fn process_streaming_chat_with_ws(
         ));
     }
 
-    // 返回一个空的响应，表示流已完成
+    // 返回流完成响应，表示流已结束
     // 所有响应块都已经实时发送给客户端
     Ok(RemoteResponse {
         request_id: String::new(), // Will be replaced by caller
-        response: ResponseContent::Text("".to_string()),
+        response: ResponseContent::StreamComplete {
+            token_usage,
+            interrupted: false,
+        },
         error: None,
-        token_usage,
+        token_usage: None, // token_usage 已经在 StreamComplete 中包含了
     })
 }

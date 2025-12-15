@@ -1,9 +1,6 @@
 use crate::{tui::{app::App}};
 
-mod messageblock;
 mod app;
-mod messagetext;
-mod inputarea;
 mod appevent;
 mod appchat;
 mod renderer;
@@ -11,6 +8,7 @@ mod state_manager;
 mod commands;
 mod command_suggestions;
 mod option_dialog;
+mod ui;
 
 #[allow(unused_imports)]
 pub use commands::{TuiCommand, CommandRegistry, init_global_registry, global_registry};

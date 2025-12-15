@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod common;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenUsage {
     // 当前对话本地发送 token 数，也就是前面所有对话加上本次用户输出
     pub prompt_tokens: u32,

@@ -1,35 +1,30 @@
 use std::{
     io,
-    sync::{atomic::AtomicBool, mpsc, Arc},
+    sync::{mpsc},
 };
 
 use log::{error, info};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
-use crate::tui::app::App;
+use crate::tui::app::{App, ETuiEvent};
 
 /// 事件处理器，负责处理键盘事件和事件监听
 pub struct AppEvent;
 
 impl AppEvent {
     /// 监听键盘事件并将其发送到事件通道
-    pub async fn watch_events(
-        tx: mpsc::Sender<Event>,
-        should_exit: Arc<AtomicBool>,
+    pub fn watch_events(
+        tx: mpsc::Sender<ETuiEvent>,
     ) -> io::Result<()> {
-        while !should_exit.load(std::sync::atomic::Ordering::Relaxed) {
-            match event::read() {
-                Ok(Event::Key(key)) => {
-                    if let Err(e) = tx.send(Event::Key(key)) {
-                        error!("Failed to send event: {}", e);
-                        break;
-                    }
+        match event::read() {
+            Ok(Event::Key(key)) => {
+                if let Err(e) = tx.send(ETuiEvent::KeyEvent(key)) {
+                    error!("Failed to send event: {}", e);
                 }
-                Ok(_) => {} // 忽略非键盘事件
-                Err(e) => {
-                    error!("Failed to read event: {}", e);
-                    break;
-                }
+            }
+            Ok(_) => {} // 忽略非键盘事件
+            Err(e) => {
+                error!("Failed to read event: {}", e);
             }
         }
         Ok(())
@@ -47,7 +42,7 @@ impl AppEvent {
         if chat.is_running() {
             chat.cancel();
         } else {
-            app.should_exit.store(true, std::sync::atomic::Ordering::Relaxed);
+            app.event_tx.send(ETuiEvent::Exit).unwrap();
         }
     }
 
@@ -176,12 +171,12 @@ impl AppEvent {
                     // 继续处理当前输入
                     let input_clone = app.input.clone();
                     let chat_clone = app.chat.clone();
-                    let scroll_tx_clone = app.scroll_down_tx.clone();
+                    let event_tx_clone = app.event_tx.clone();
                     tokio::spawn(async move {
                         crate::tui::appchat::AppChat::handle_chat(
                             chat_clone,
                             input_clone,
-                            scroll_tx_clone,
+                            event_tx_clone,
                         ).await;
                     });
                 } else if res == "no" || res == "n" {
@@ -199,7 +194,7 @@ impl AppEvent {
                     // 继续执行工具调用
                     tokio::spawn(crate::tui::appchat::AppChat::handle_tool_execution(
                         app.chat.clone(),
-                        app.scroll_down_tx.clone(),
+                        app.event_tx.clone(),
                     ));
                 } else if res == "no" || res == "n" {
                     chat.reject_tool_call();
@@ -213,18 +208,18 @@ impl AppEvent {
                     tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
                         app.chat.clone(),
                         app.input.clone(),
-                        app.scroll_down_tx.clone(),
+                        app.event_tx.clone(),
                     ));
                 } else if res == "no" || res == "n" {
                     chat.reject_tool_call();
                 }
-            } else {
-                tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
-                    app.chat.clone(),
-                    app.input.clone(),
-                    app.scroll_down_tx.clone(),
-                ));
-            }
+                } else {
+                    tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
+                        app.chat.clone(),
+                        app.input.clone(),
+                        app.event_tx.clone(),
+                    ));
+                }
             app.cursor_offset = 0;
             app.input.clear();
         }
@@ -240,21 +235,40 @@ impl AppEvent {
     }
 
     /// 处理所有事件
-    pub fn handle_events(app: &mut App) -> io::Result<()> {
-        if let Ok(Event::Key(key)) = app.event_rx.try_recv() {
-            app.dirty = true;
-            if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Esc => Self::handle_escape_key(app),
-                    KeyCode::Down | KeyCode::Up | KeyCode::Left | KeyCode::Right => {
-                        Self::handle_navigation_keys(app, key.code)
+    pub fn handle_events(app: &mut App, event: ETuiEvent) -> io::Result<()> {
+        match event {
+            ETuiEvent::KeyEvent(key) => {
+                if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
+                    error!("{:?}", e);
+                }
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Esc => Self::handle_escape_key(app),
+                        KeyCode::Down | KeyCode::Up | KeyCode::Left | KeyCode::Right => {
+                            Self::handle_navigation_keys(app, key.code)
+                        }
+                        KeyCode::Delete | KeyCode::Backspace => Self::handle_delete_keys(app),
+                        KeyCode::Enter => Self::handle_enter_key(app),
+                        KeyCode::Char(c) => Self::handle_char_key(app, c),
+                        _ => {}
                     }
-                    KeyCode::Delete | KeyCode::Backspace => Self::handle_delete_keys(app),
-                    KeyCode::Enter => Self::handle_enter_key(app),
-                    KeyCode::Char(c) => Self::handle_char_key(app, c),
-                    _ => {}
                 }
             }
+            ETuiEvent::InfoMessage(insert_position, model_message) => {
+                // 处理信息消息
+                app.info_messages.push((insert_position, model_message));
+                app.refresh();
+            }
+            ETuiEvent::ScrollToBottom => {
+                // 处理滚动到底部事件
+                if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
+                    error!("{:?}", e);
+                }
+                if app.max_line > app.window_height {
+                    app.index = app.max_line - app.window_height;
+                }
+            }
+            _ => {} // 忽略其他事件类型
         }
         Ok(())
     }

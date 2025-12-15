@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use log::error;
 use std::fmt::Debug;
 
 /// TUI斜杠命令trait
@@ -158,7 +159,9 @@ impl TuiCommand for ExitCommand {
     }
     
     async fn execute(&self, app: &mut crate::tui::app::App, _args: &str) -> bool {
-        app.should_exit.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Err(e) = app.event_tx.send(super::app::ETuiEvent::Exit) {
+            error!("{:?}", e);
+        }
         true
     }
 }

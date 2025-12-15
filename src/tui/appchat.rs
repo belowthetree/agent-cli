@@ -6,7 +6,7 @@ use log::{error, info};
 use crate::{
     chat::{Chat, StreamedChatResponse},
     model::param::ModelMessage,
-    tui::inputarea::InputArea,
+    tui::{app::ETuiEvent, ui::inputarea::InputArea},
 };
 
 /// 聊天处理器，负责处理聊天和工具执行逻辑
@@ -24,7 +24,7 @@ impl AppChat {
     pub async fn handle_chat(
         selfchat: Arc<Mutex<Chat>>,
         input: InputArea,
-        tx: mpsc::Sender<bool>,
+        tx: mpsc::Sender<ETuiEvent>,
     ) {
         // 检查是否正在等待对话轮次确认
         {
@@ -83,17 +83,24 @@ impl AppChat {
     }
 
     /// 发送滚动到底部信号
-    fn send_scroll_signal(tx: &mpsc::Sender<bool>) {
-        if let Err(e) = tx.send(true) {
+    fn send_scroll_signal(tx: &mpsc::Sender<ETuiEvent>) {
+        if let Err(e) = tx.send(ETuiEvent::ScrollToBottom) {
             error!("Failed to send scroll signal: {}", e);
         }
     }
 
     /// 处理流式响应错误
-    fn handle_stream_error(selfchat: &Arc<Mutex<Chat>>, err: impl std::fmt::Display) {
+    fn handle_stream_error(selfchat: &Arc<Mutex<Chat>>, err: impl std::fmt::Display, tx: &mpsc::Sender<ETuiEvent>) {
         error!("Stream response error: {}", err);
-        let mut ctx = selfchat.lock().unwrap();
-        ctx.add_message(ModelMessage::assistant(err.to_string(), "", vec![]));
+        let insert_position = {
+            let chat = selfchat.lock().unwrap();
+            chat.context().len()
+        };
+        let mut msg = ModelMessage::system(err.to_string());
+        msg.role = "info".into(); // 使用特殊角色
+        if let Err(e) = tx.send(ETuiEvent::InfoMessage(insert_position, msg)) {
+            log::error!("Failed to send info message event: {}", e);
+        }
     }
 
     /// 确保上下文中存在一个assistant消息，如果不存在则创建一个
@@ -159,7 +166,7 @@ impl AppChat {
     async fn process_stream_responses(
         selfchat: &Arc<Mutex<Chat>>,
         stream: impl futures::Stream<Item = Result<StreamedChatResponse, impl std::fmt::Display>>,
-        tx: &mpsc::Sender<bool>,
+        tx: &mpsc::Sender<ETuiEvent>,
     ) {
         pin_mut!(stream);
         
@@ -172,7 +179,7 @@ impl AppChat {
                     Self::handle_stream_response(selfchat, response).await;
                 }
                 Some(Err(err)) => {
-                    Self::handle_stream_error(selfchat, err);
+                    Self::handle_stream_error(selfchat, err, tx);
                     break;
                 }
                 None => {
@@ -185,7 +192,7 @@ impl AppChat {
     /// 处理工具执行
     pub async fn handle_tool_execution(
         selfchat: Arc<Mutex<Chat>>,
-        tx: mpsc::Sender<bool>,
+        tx: mpsc::Sender<ETuiEvent>,
     ) {
         // 获取聊天实例并克隆
         let chat = {

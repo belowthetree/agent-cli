@@ -8,7 +8,7 @@ fn cow_is_empty(cow: &Cow<'static, str>) -> bool {
     cow.is_empty()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelMessage {
     pub role: Cow<'static, str>,
     pub content: Cow<'static, str>,
@@ -134,7 +134,7 @@ fn _default_tool_call_function() -> ToolCallFunction {
     ToolCallFunction::new()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolCall {
     #[serde(default)]
     pub index: usize,
@@ -158,7 +158,7 @@ impl ToolCall {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolCallFunction {
     #[serde(default)]
     pub name: String,

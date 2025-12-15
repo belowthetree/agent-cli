@@ -2,7 +2,7 @@ use log::debug;
 
 use crate::{
     model::param::ModelMessage,
-    tui::{app::App, messageblock::MessageBlock},
+    tui::{app::App, ui::messageblock::MessageBlock},
 };
 
 /// 状态管理器，负责管理应用程序状态

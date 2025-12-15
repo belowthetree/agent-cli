@@ -1,26 +1,29 @@
 use std::{
     io::{self},
     sync::{
-        atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex
+        mpsc, Arc, Mutex
     },
 };
 
 use clap::Parser;
 use ratatui::{
-    crossterm::event::{Event}, widgets::ScrollbarState, DefaultTerminal, Frame
+    crossterm::event::KeyEvent, widgets::ScrollbarState, DefaultTerminal, Frame
 };
 
 use crate::{
-    Args, chat::Chat, mcp, tui::{
-        appevent::AppEvent,
-        inputarea::InputArea,
-        messageblock::MessageBlock,
-        option_dialog::OptionDialog,
-        renderer::Renderer,
-        state_manager::StateManager,
-    },
-    model::param::ModelMessage,
+    Args, chat::Chat, mcp, model::param::ModelMessage, tui::{
+        appevent::AppEvent, option_dialog::OptionDialog, renderer::Renderer, state_manager::StateManager, ui::{inputarea::InputArea, messageblock::MessageBlock}
+    }
 };
+
+#[derive(PartialEq)]
+pub enum ETuiEvent {
+    KeyEvent(KeyEvent),
+    InfoMessage(usize, ModelMessage),
+    ScrollToBottom,
+    RefreshUI,
+    Exit,
+}
 
 /// 终端用户界面应用程序
 /// 
@@ -28,8 +31,6 @@ use crate::{
 pub struct App {
     /// 聊天会话状态，包含模型上下文和工具配置
     pub chat: Arc<Mutex<Chat>>,
-    /// 应用程序退出标志
-    pub should_exit: Arc<AtomicBool>,
     /// 当前垂直滚动位置（行索引）
     pub index: u16,
     /// 文本输入区域
@@ -48,16 +49,10 @@ pub struct App {
     pub max_line: u16,
     /// 垂直滚动条状态
     pub vertical_scroll_state: ScrollbarState,
-    /// 接收滚动到底部信号的接收器
-    pub scroll_down_rx: mpsc::Receiver<bool>,
-    /// 发送滚动到底部信号的发送器
-    pub scroll_down_tx: mpsc::Sender<bool>,
-    /// 接收键盘事件的接收器
-    pub event_rx: mpsc::Receiver<Event>,
-    /// 发送键盘事件的发送器
-    pub event_tx: mpsc::Sender<Event>,
-    /// 脏标志，表示需要重新渲染
-    pub dirty: bool,
+    /// 接收TUI事件的接收器
+    event_rx: mpsc::Receiver<ETuiEvent>,
+    /// 发送TUI事件的发送器
+    pub event_tx: mpsc::Sender<ETuiEvent>,
     /// 光标在输入区域中的水平偏移（字符宽度）
     pub cursor_offset: u16,
     /// 可用命令列表
@@ -76,8 +71,7 @@ impl App {
         if Some(true) == args.use_tool {
             chat = chat.tools(mcp::get_config_tools());
         }
-        let (scroll_tx, scroll_rx) = mpsc::channel();
-        let (event_tx, event_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel::<ETuiEvent>();
         
         // 初始化命令注册器并获取命令列表
         let registry = crate::tui::init_global_registry();
@@ -85,7 +79,6 @@ impl App {
         
         Self {
             chat: Arc::new(Mutex::new(chat)),
-            should_exit: Arc::new(AtomicBool::new(false)),
             index: 0,
             input: InputArea::default(),
             window_height: 20,
@@ -94,11 +87,8 @@ impl App {
             width: 20,
             max_line: 100,
             vertical_scroll_state: ScrollbarState::new(1),
-            scroll_down_rx: scroll_rx,
-            scroll_down_tx: scroll_tx,
             event_rx,
             event_tx,
-            dirty: true,
             cursor_offset: 0,
             commands,
             option_dialog: OptionDialog::new(),
@@ -129,27 +119,24 @@ impl App {
     /// 
     /// 循环持续运行直到用户退出（按ESC键）或发生错误。
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
-        let t = tokio::spawn(AppEvent::watch_events(
-            self.event_tx.clone(),
-            self.should_exit.clone(),
-        ));
-        while !self.should_exit.load(Ordering::Relaxed) {
-            if self.dirty {
-                terminal.draw(|frame| {
-                    self.render(frame);
-                })?;
-                self.dirty = false;
-            }
-            AppEvent::handle_events(&mut self)?;
-            // 正在运行的话始终拉到最底部
-            if self.scroll_down_rx.try_recv().is_ok() {
-                self.dirty = true;
-                if self.max_line > self.window_height {
-                    self.index = self.max_line - self.window_height;
+        terminal.draw(|frame| {
+            self.render(frame);
+        })?;
+        loop {
+            if let Ok(ev) = self.event_rx.try_recv() {
+                if ev == ETuiEvent::Exit {
+                    break;
+                } else if ev == ETuiEvent::RefreshUI {
+                    terminal.draw(|frame| {
+                        self.render(frame);
+                    })?;
                 }
+                AppEvent::watch_events(
+                    self.event_tx.clone(),
+                )?;
+                AppEvent::handle_events(&mut self, ev)?;
             }
         }
-        t.abort();
         Ok(())
     }
 
@@ -209,9 +196,10 @@ impl App {
             chat.context().len()
         };
         
-        // 添加到信息消息列表中，不添加到聊天上下文中
-        self.info_messages.push((insert_position, model_message));
-        self.refresh();
+        // 通过事件通道发送信息消息
+        if let Err(e) = self.event_tx.send(ETuiEvent::InfoMessage(insert_position, model_message)) {
+            log::error!("Failed to send info message event: {}", e);
+        }
     }
     
     /// 添加信息消息
@@ -229,9 +217,10 @@ impl App {
             chat.context().len()
         };
         
-        // 添加到信息消息列表中，不添加到聊天上下文中
-        self.info_messages.push((insert_position, model_message));
-        self.refresh();
+        // 通过事件通道发送信息消息
+        if let Err(e) = self.event_tx.send(ETuiEvent::InfoMessage(insert_position, model_message)) {
+            log::error!("Failed to send info message event: {}", e);
+        }
     }
     
     /// 显示选项对话框

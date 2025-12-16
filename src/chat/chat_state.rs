@@ -154,15 +154,6 @@ impl ChatState {
         &self.client
     }
 
-    pub fn is_need_call_tool(&self)->bool {
-        if let Some(last) = self.context().last() {
-            if let Some(_) = &last.tool_calls {
-                return true;
-            }
-        }
-        false
-    }
-
     pub fn get_tool_calls(&self)->Vec<ToolCall> {
         if let Some(last) = self.context().last() {
             if let Some(tools) = &last.tool_calls {

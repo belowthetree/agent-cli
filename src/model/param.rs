@@ -89,6 +89,18 @@ impl ModelMessage {
         }
     }
 
+    pub fn info<S: Into<Cow<'static, str>>>(content: S) -> Self {
+        Self {
+            role: "info".into(),
+            content: content.into(),
+            think: "".into(),
+            name: "".into(),
+            tool_call_id: "".into(),
+            tool_calls: None,
+            token_usage: None,
+        }
+    }
+
     pub fn add_tool(&mut self, tool: ToolCall) {
         if self.tool_calls.is_none() {
             self.tool_calls = Some(vec![]);

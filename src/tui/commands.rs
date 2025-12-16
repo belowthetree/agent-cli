@@ -136,9 +136,10 @@ impl TuiCommand for ClearCommand {
     
     async fn execute(&self, app: &mut crate::tui::app::App, _args: &str) -> bool {
         app.blocks.clear();
-        app.info_messages.clear();
+        app.messages.clear();
         app.max_line = 0;
         app.index = 0;
+        app.chat.lock().unwrap().clear_context();
         app.add_system_message("聊天记录和信息消息已清除");
         true
     }

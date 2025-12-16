@@ -172,6 +172,7 @@ impl AppEvent {
                         chat.confirm();
                         // 继续执行工具调用
                         tokio::spawn(crate::tui::appchat::AppChat::handle_tool_execution(
+                            app.messages.len(),
                             app.chat.clone(),
                             app.event_tx.clone(),
                         ));
@@ -192,8 +193,10 @@ impl AppEvent {
                         let input_clone = app.input.clone();
                         let chat_clone = app.chat.clone();
                         let event_tx_clone = app.event_tx.clone();
+                        let idx = app.messages.len();
                         tokio::spawn(async move {
                             crate::tui::appchat::AppChat::handle_chat(
+                                idx,
                                 chat_clone,
                                 input_clone,
                                 event_tx_clone,
@@ -207,6 +210,7 @@ impl AppEvent {
                 EChatState::Idle => {
                     info!("Idle 状态，开始对话");
                     tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
+                        app.messages.len(),
                         app.chat.clone(),
                         app.input.clone(),
                         app.event_tx.clone(),
@@ -249,10 +253,23 @@ impl AppEvent {
                     }
                 }
             }
-            ETuiEvent::InfoMessage(insert_position, model_message) => {
+            ETuiEvent::AddMessage(model_message) => {
                 // 处理信息消息
-                app.info_messages.push((insert_position, model_message));
+                app.messages.push(model_message);
                 app.refresh();
+            }
+            ETuiEvent::UpdateMessage(idx, msg) => {
+                if app.messages.len() > idx {
+                    app.messages[idx].add_content(msg.content);
+                    app.messages[idx].add_think(msg.think);
+                    if let Some(calls) = msg.tool_calls {
+                        for tool in calls {
+                            app.messages[idx].add_tool(tool);
+                        }
+                    }
+                } else if app.messages.len() == idx {
+                    app.messages.push(msg);
+                }
             }
             ETuiEvent::ScrollToBottom => {
                 // 处理滚动到底部事件

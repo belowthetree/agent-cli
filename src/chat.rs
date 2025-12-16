@@ -199,7 +199,7 @@ impl Chat {
                     }
                 } else {
                     warn!("正在运行");
-                    yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()));
+                    yield Err(anyhow::anyhow!("对话不在空闲状态，当前状态：{:?}", self.get_state()));
                     break;
                 }
             }
@@ -255,7 +255,10 @@ impl Chat {
                     }
                 } else {
                     warn!("正在运行");
-                    yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()));
+                    if self.is_over_context_limit() {
+                        yield Err(anyhow::anyhow!("对话超过次数限制：{}", self.get_conversation_turn_info().1));
+                    }
+                    yield Err(anyhow::anyhow!("对话不在空闲状态，当前状态：{:?}", self.get_state()));
                     break;
                 }
             }
@@ -298,11 +301,6 @@ impl Chat {
     /// 获取聊天上下文
     pub fn context(&self) -> &Vec<ModelMessage> {
         self.state.context()
-    }
-
-    /// 获取可变的聊天上下文
-    pub fn context_mut(&mut self) -> &mut Vec<ModelMessage> {
-        self.state.context_mut()
     }
 
     pub fn clear_context(&mut self) {

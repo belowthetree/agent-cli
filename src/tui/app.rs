@@ -13,16 +13,17 @@ use ratatui::{
 
 use crate::{
     Args, chat::Chat, mcp, model::param::ModelMessage, tui::{
-        appevent::AppEvent, option_dialog::OptionDialog, renderer::Renderer, state_manager::StateManager, ui::{inputarea::InputArea, messageblock::MessageBlock}
+        appevent::AppEvent, ui::option_dialog::OptionDialog, renderer::Renderer, state_manager::StateManager, ui::{inputarea::InputArea, messageblock::MessageBlock}
     }
 };
 
 #[derive(PartialEq, Debug)]
 pub enum ETuiEvent {
     KeyEvent(KeyEvent),
-    InfoMessage(usize, ModelMessage),
+    AddMessage(ModelMessage),
     ScrollToBottom,
     RefreshUI,
+    UpdateMessage(usize, ModelMessage),
     Exit,
 }
 
@@ -40,10 +41,8 @@ pub struct App {
     pub window_height: u16,
     /// 消息块列表，用于渲染
     pub blocks: Vec<MessageBlock>,
-    /// 信息消息列表，用于显示指令、提示等信息
-    /// 每个元素是一个元组：(插入位置, 消息)
-    /// 插入位置表示该信息消息应该插入到聊天上下文中的哪个位置
-    pub info_messages: Vec<(usize, ModelMessage)>,
+    /// 信息消息列表，用于显示用户、模型、指令、提示等信息
+    pub messages: Vec<ModelMessage>,
     /// 当前可用宽度（不包括滚动条）
     pub width: u16,
     /// 所有消息的总行数
@@ -84,7 +83,7 @@ impl App {
             input: InputArea::default(),
             window_height: 20,
             blocks: vec![],
-            info_messages: vec![],
+            messages: vec![],
             width: 20,
             max_line: 100,
             vertical_scroll_state: ScrollbarState::new(1),
@@ -129,6 +128,7 @@ impl App {
         })?;
         loop {
             if let Ok(ev) = self.event_rx.try_recv() {
+                info!("收到事件 {:?}", ev);
                 if ev == ETuiEvent::Exit {
                     info!("收到退出 {:?}", ev);
                     break;
@@ -191,17 +191,9 @@ impl App {
     /// 添加系统消息
     pub fn add_system_message(&mut self, message: &str) {
         use crate::model::param::ModelMessage;
-        let mut model_message = ModelMessage::system(message.to_string());
-        model_message.role = "info".into(); // 使用特殊角色
-        
-        // 获取当前聊天上下文中的消息数量，作为插入位置
-        let insert_position = {
-            let chat = self.chat.lock().unwrap();
-            chat.context().len()
-        };
-        
+        let model_message = ModelMessage::info(message.to_string());
         // 通过事件通道发送信息消息
-        if let Err(e) = self.event_tx.send(ETuiEvent::InfoMessage(insert_position, model_message)) {
+        if let Err(e) = self.event_tx.send(ETuiEvent::AddMessage(model_message)) {
             log::error!("Failed to send info message event: {}", e);
         }
     }
@@ -212,17 +204,9 @@ impl App {
     /// 这些消息会显示在聊天消息之间。
     pub fn add_info_message(&mut self, message: &str) {
         use crate::model::param::ModelMessage;
-        let mut model_message = ModelMessage::system(message.to_string());
-        model_message.role = "info".into(); // 使用特殊角色
-        
-        // 获取当前聊天上下文中的消息数量，作为插入位置
-        let insert_position = {
-            let chat = self.chat.lock().unwrap();
-            chat.context().len()
-        };
-        
+        let model_message = ModelMessage::info(message.to_string());
         // 通过事件通道发送信息消息
-        if let Err(e) = self.event_tx.send(ETuiEvent::InfoMessage(insert_position, model_message)) {
+        if let Err(e) = self.event_tx.send(ETuiEvent::AddMessage(model_message)) {
             log::error!("Failed to send info message event: {}", e);
         }
     }

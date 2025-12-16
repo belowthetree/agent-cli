@@ -1,7 +1,7 @@
 use std::char;
 use log::{debug, info};
 use ratatui::{widgets::{Block, Borders, Paragraph, Widget, Wrap}, style::Stylize};
-use crate::tui::{get_char_width, command_suggestions::CommandSuggestions};
+use crate::tui::{get_char_width, ui::command_suggestions::CommandSuggestions};
 
 #[derive(Clone)]
 pub struct InputArea {

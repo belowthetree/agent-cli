@@ -1,4 +1,6 @@
-use crate::{tui::{app::App}};
+use std::sync::mpsc;
+
+use crate::tui::app::{App, ETuiEvent};
 
 mod app;
 mod appevent;
@@ -6,12 +8,11 @@ mod appchat;
 mod renderer;
 mod state_manager;
 mod commands;
-mod command_suggestions;
-mod option_dialog;
 mod ui;
 
 #[allow(unused_imports)]
 pub use commands::{TuiCommand, CommandRegistry, init_global_registry, global_registry};
+use log::error;
 
 pub async fn run() {
     color_eyre::install().unwrap();
@@ -30,6 +31,12 @@ pub fn get_str_width(s: &str)->u16 {
         width += get_char_width(char);
     }
     width
+}
+
+pub fn send_event(tx: &mpsc::Sender<ETuiEvent>, ev: ETuiEvent) {
+    if let Err(e) = tx.send(ev) {
+        error!("{:?}", e);
+    }
 }
 
 #[cfg(test)]

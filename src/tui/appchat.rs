@@ -6,7 +6,7 @@ use log::{error, info};
 use crate::{
     chat::{Chat, EChatState, StreamedChatResponse},
     model::param::ModelMessage,
-    tui::{app::ETuiEvent, ui::inputarea::InputArea},
+    tui::{app::ETuiEvent, send_event, ui::inputarea::InputArea},
 };
 
 /// 聊天处理器，负责处理聊天和工具执行逻辑
@@ -22,37 +22,34 @@ impl AppChat {
     /// 4. 发送滚动到底部的信号
     /// 5. 更新聊天上下文以包含完整的响应和token使用信息
     pub async fn handle_chat(
+        idx: usize,
         selfchat: Arc<Mutex<Chat>>,
         input: InputArea,
         tx: mpsc::Sender<ETuiEvent>,
     ) {
-        // 检查是否正在等待对话轮次确认
-        {
-            let guard = selfchat.lock().unwrap();
-            if guard.get_state() != EChatState::Idle {
-                // 如果正在等待确认，不处理新的聊天
-                return;
-            }
+        info!("处理聊天");
+        if selfchat.lock().unwrap().get_state() != EChatState::Idle {
+            info!("正忙碌");
+            return;
         }
-        
         // 获取聊天实例并克隆
-        let mut chat = {
-            let guard = selfchat.lock().unwrap();
-            guard.clone()
-        };
-        
-        // 添加用户输入到聊天上下文
-        Self::add_user_input_to_context(&selfchat, &input, &mut chat);
+        if !input.content.is_empty() {
+            selfchat.lock().unwrap().add_message(ModelMessage::user(input.content.clone()));
+            selfchat
+                .lock()
+                .unwrap()
+                .add_message(ModelMessage::user(input.content.clone()));
+            send_event(&tx, ETuiEvent::AddMessage(ModelMessage::user(input.content.clone())));
+        }
 
+        let mut chat = selfchat.lock().unwrap().clone();
         let stream = chat.stream_rechat();
-        
         // 发送初始滚动信号
-        Self::send_scroll_signal(&tx);
-        
+        send_event(&tx, ETuiEvent::ScrollToBottom);
         // 处理流式响应
-        Self::process_stream_responses(&selfchat, stream, &tx).await;
-        
-        // 更新聊天上下文并解锁
+        Self::process_stream_responses(idx + 1, stream, &tx).await;
+
+        // 更新聊天上下文
         {
             let mut guard = selfchat.lock().unwrap();
             // 清空当前上下文，然后添加所有消息
@@ -63,98 +60,45 @@ impl AppChat {
         }
     }
 
-    /// 添加用户输入到聊天上下文
-    fn add_user_input_to_context(
-        selfchat: &Arc<Mutex<Chat>>,
-        input: &InputArea,
-        chat: &mut Chat,
-    ) {
-        if !input.content.is_empty() {
-            chat.add_message(ModelMessage::user(input.content.clone()));
-            selfchat
-                .lock()
-                .unwrap()
-                .add_message(ModelMessage::user(input.content.clone()));
-        }
-    }
-
-    /// 发送滚动到底部信号
-    fn send_scroll_signal(tx: &mpsc::Sender<ETuiEvent>) {
-        if let Err(e) = tx.send(ETuiEvent::ScrollToBottom) {
-            error!("Failed to send scroll signal: {}", e);
-        }
-    }
-
     /// 处理流式响应错误
-    fn handle_stream_error(selfchat: &Arc<Mutex<Chat>>, err: impl std::fmt::Display, tx: &mpsc::Sender<ETuiEvent>) {
+    fn handle_stream_error(err: impl std::fmt::Display, tx: &mpsc::Sender<ETuiEvent>) {
         error!("Stream response error: {}", err);
-        let insert_position = {
-            let chat = selfchat.lock().unwrap();
-            chat.context().len()
-        };
-        let mut msg = ModelMessage::system(err.to_string());
-        msg.role = "info".into(); // 使用特殊角色
-        if let Err(e) = tx.send(ETuiEvent::InfoMessage(insert_position, msg)) {
-            log::error!("Failed to send info message event: {}", e);
-        }
-    }
-
-    /// 确保上下文中存在一个assistant消息，如果不存在则创建一个
-    fn ensure_assistant_message(ctx: &mut std::sync::MutexGuard<'_, Chat>) -> usize {
-        let last_is_assistant = ctx.context().last()
-            .map(|m| m.role == "assistant")
-            .unwrap_or(false);
-        
-        if !last_is_assistant {
-            ctx.add_message(ModelMessage::assistant("", "", vec![]));
-        }
-        ctx.context().len() - 1
+        let msg = ModelMessage::info(err.to_string());
+        send_event(&tx, ETuiEvent::AddMessage(msg));
     }
 
     /// 处理流式响应
-    async fn handle_stream_response(selfchat: &Arc<Mutex<Chat>>, response: StreamedChatResponse) {
+    async fn handle_stream_response(idx: usize, response: StreamedChatResponse, tx: &mpsc::Sender<ETuiEvent>) {
         match response {
             StreamedChatResponse::Text(text) => {
-                let mut ctx = selfchat.lock().unwrap();
-                let _idx = Self::ensure_assistant_message(&mut ctx);
-                // 使用 context_mut() 获取可变引用
-                if let Some(last) = ctx.context_mut().last_mut() {
-                    last.add_content(text);
+                if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant(text, "", vec![]))) {
+                    error!("{:?}", e);
                 }
             }
             StreamedChatResponse::ToolCall(tool_call) => {
-                let mut ctx = selfchat.lock().unwrap();
-                let _idx = Self::ensure_assistant_message(&mut ctx);
-                if let Some(last) = ctx.context_mut().last_mut() {
-                    last.add_tool(tool_call);
+                if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant("", "", vec![tool_call]))) {
+                    error!("{:?}", e);
                 }
             }
             StreamedChatResponse::Reasoning(think) => {
-                let mut ctx = selfchat.lock().unwrap();
-                let _idx = Self::ensure_assistant_message(&mut ctx);
-                if let Some(last) = ctx.context_mut().last_mut() {
-                    last.add_think(think);
+                if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant("", think, vec![]))) {
+                    error!("{:?}", e);
                 }
             }
             StreamedChatResponse::ToolResponse(tool) => {
-                let mut ctx = selfchat.lock().unwrap();
-                ctx.add_message(tool);
+                if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, tool)) {
+                    error!("{:?}", e);
+                }
             }
             StreamedChatResponse::End => {
-                // End事件表示模型响应完成，此时chat.context()中应该已经包含了完整的消息
-                // 包括token_usage信息
-                
-                // 增加对话轮次计数（模型每次回复时增加1）
-                let ctx = selfchat.lock().unwrap();
-                // 检查是否超过最大对话轮次
-                info!("对话轮次 {:?}", ctx.get_conversation_turn_info());
             }
         }
     }
 
     /// 处理流式响应循环
+    /// 传入 idx 为当前消息的插入位置
     async fn process_stream_responses(
-        selfchat: &Arc<Mutex<Chat>>,
+        idx: usize,
         stream: impl futures::Stream<Item = Result<StreamedChatResponse, impl std::fmt::Display>>,
         tx: &mpsc::Sender<ETuiEvent>,
     ) {
@@ -162,14 +106,13 @@ impl AppChat {
         
         loop {
             // 发送滚动信号以确保界面更新
-            Self::send_scroll_signal(tx);
-            
+            send_event(&tx, ETuiEvent::ScrollToBottom);
             match stream.next().await {
                 Some(Ok(response)) => {
-                    Self::handle_stream_response(selfchat, response).await;
+                    Self::handle_stream_response(idx, response, tx).await;
                 }
                 Some(Err(err)) => {
-                    Self::handle_stream_error(selfchat, err, tx);
+                    Self::handle_stream_error(err, tx);
                     break;
                 }
                 None => {
@@ -181,40 +124,19 @@ impl AppChat {
 
     /// 处理工具执行
     pub async fn handle_tool_execution(
+        idx: usize,
         selfchat: Arc<Mutex<Chat>>,
         tx: mpsc::Sender<ETuiEvent>,
     ) {
         // 检查是否正在等待对话轮次确认
-        {
-            let guard = selfchat.lock().unwrap();
-            if guard.get_state() != EChatState::Idle {
-                // 如果正在等待确认，不处理新的聊天
-                return;
-            }
+        let mut guard = selfchat.lock().unwrap().clone();
+        if guard.get_state() != EChatState::Idle {
+            info!("正忙碌");
+            return;
         }
-        
-        // 获取聊天实例并克隆
-        let mut chat = {
-            let guard = selfchat.lock().unwrap();
-            guard.clone()
-        };
-
-        let stream = chat.stream_rechat();
-        
-        // 发送初始滚动信号
-        Self::send_scroll_signal(&tx);
-        
+        let stream = guard.stream_rechat();
+        send_event(&tx, ETuiEvent::ScrollToBottom);
         // 处理流式响应
-        Self::process_stream_responses(&selfchat, stream, &tx).await;
-        
-        // 更新聊天上下文并解锁
-        {
-            let mut guard = selfchat.lock().unwrap();
-            // 清空当前上下文，然后添加所有消息
-            guard.clear_context();
-            for message in chat.context() {
-                guard.add_message(message.clone());
-            }
-        }
+        Self::process_stream_responses(idx, stream, &tx).await;
     }
 }

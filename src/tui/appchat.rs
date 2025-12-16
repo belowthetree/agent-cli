@@ -145,8 +145,7 @@ impl AppChat {
                 // 包括token_usage信息
                 
                 // 增加对话轮次计数（模型每次回复时增加1）
-                let mut ctx = selfchat.lock().unwrap();
-                ctx.increment_conversation_turn();
+                let ctx = selfchat.lock().unwrap();
                 // 检查是否超过最大对话轮次
                 info!("对话轮次 {:?}", ctx.get_conversation_turn_info());
             }
@@ -185,33 +184,36 @@ impl AppChat {
         selfchat: Arc<Mutex<Chat>>,
         tx: mpsc::Sender<ETuiEvent>,
     ) {
+        // 检查是否正在等待对话轮次确认
+        {
+            let guard = selfchat.lock().unwrap();
+            if guard.get_state() != EChatState::Idle {
+                // 如果正在等待确认，不处理新的聊天
+                return;
+            }
+        }
+        
         // 获取聊天实例并克隆
-        let chat = {
+        let mut chat = {
             let guard = selfchat.lock().unwrap();
             guard.clone()
         };
 
-        // 执行工具调用
-        let stream = chat.call_tool();
-        pin_mut!(stream);
+        let stream = chat.stream_rechat();
         
-        // 发送滚动信号
+        // 发送初始滚动信号
         Self::send_scroll_signal(&tx);
         
-        // 处理工具响应
-        while let Some(res) = stream.next().await {
-            match res {
-                Ok(tool_response) => {
-                    // 添加工具响应到上下文
-                    let mut guard = selfchat.lock().unwrap();
-                    guard.add_message(tool_response);
-                    // 发送滚动信号
-                    Self::send_scroll_signal(&tx);
-                }
-                Err(e) => {
-                    error!("工具调用错误: {}", e);
-                    break;
-                }
+        // 处理流式响应
+        Self::process_stream_responses(&selfchat, stream, &tx).await;
+        
+        // 更新聊天上下文并解锁
+        {
+            let mut guard = selfchat.lock().unwrap();
+            // 清空当前上下文，然后添加所有消息
+            guard.clear_context();
+            for message in chat.context() {
+                guard.add_message(message.clone());
             }
         }
     }

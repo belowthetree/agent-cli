@@ -12,7 +12,7 @@ pub enum EChatState {
     Running,
     // 等待工具执行确认
     WaitingToolConfirm,
-    // 等待工具调用
+    // 等待工具调用，这个时候说明已经确认过了
     WaitingToolUse,
     // 等待继续对话确认
     WaitingTurnConfirm,
@@ -79,7 +79,7 @@ impl ChatState {
     }
 
     /// 检查是否有待处理的工具调用
-    pub fn is_waiting_tool(&self) -> bool {
+    pub fn is_remain_tool_call(&self) -> bool {
         if let Some(last) = self.context.last() {
             if let Some(tools) = &last.tool_calls {
                 return !tools.is_empty();
@@ -89,7 +89,7 @@ impl ChatState {
     }
 
     /// 检查是否需要询问用户确认工具调用
-    pub fn should_ask_for_tool_confirmation(&self) -> bool {
+    pub fn should_tool_confirmation(&self) -> bool {
         self.ask_before_tool_execution
     }
 

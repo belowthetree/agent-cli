@@ -134,13 +134,14 @@ impl Chat {
         self.state.set_tools(tools);
     }
 
-    pub fn is_waiting_tool(&self) -> bool {
-        self.state.is_waiting_tool()
+    // 有工具调用没处理
+    pub fn is_remain_tool_call(&self) -> bool {
+        self.state.is_remain_tool_call()
     }
 
-    // 工具调用需要确认或者轮数超了都不能
-    pub fn is_tool_call_need_confirm(&self)-> bool {
-        self.state.should_ask_for_tool_confirmation() && self.is_over_context_limit()
+    // 是否正在等待工具调用确认
+    pub fn is_need_tool_confirm(&self)-> bool {
+        self.get_state() != EChatState::WaitingToolUse && self.state.should_tool_confirmation() && self.is_remain_tool_call()
     }
 
     /// 拒绝工具调用
@@ -154,16 +155,53 @@ impl Chat {
     // 用已有的上下文再次发送给模型，用于突然中断的情况
     pub fn stream_rechat(&mut self) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
         async_stream::stream! {
-            if self.get_state() == EChatState::Idle {
-                self.state.set_state(EChatState::Running);
-                let stream = chat_stream::ChatStream::handle_rechat(self);
-                pin_mut!(stream);
-                while let Some(res) = stream.next().await {
-                    yield res;
+            loop {
+                // 先判断是否超过轮次
+                if self.is_over_context_limit() {
+                    info!("超过对话轮次 {} {}", self.state.get_conversation_turn_info(), self.max_context_num);
+                    self.state.set_state(EChatState::WaitingTurnConfirm);
                 }
-            } else {
-                warn!("正在运行");
-                yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()))
+                if self.get_state() == EChatState::Idle || self.get_state() == EChatState::WaitingToolUse {
+                    // 如果有工具调用需要确认，退出等待确认
+                    if self.is_need_tool_confirm() {
+                        warn!("等待工具确认");
+                        self.state.set_state(EChatState::WaitingToolConfirm);
+                        return;
+                    }
+                    self.state.set_state(EChatState::Running);
+                    // 处理工具调用
+                    {
+                        let stream = chat_tools::ChatTools::handle_stream_tool(self, self.get_cancel_token());
+                        pin_mut!(stream);
+                        while let Some(res) = stream.next().await {
+                            yield res;
+                        }
+                    }
+                    // 处理聊天
+                    {
+                        // 对话轮数 + 1
+                        self.state.increment_conversation_turn();
+                        let stream = chat_stream::ChatStream::handle_rechat(self);
+                        pin_mut!(stream);
+                        while let Some(res) = stream.next().await {
+                            yield res;
+                        }
+                    }
+                    // 聊天结束可能产生新的工具调用
+                    if self.is_need_tool_confirm() {
+                        warn!("等待工具确认");
+                        self.state.set_state(EChatState::WaitingToolConfirm);
+                        break;
+                    }
+                    // 无工具调用，退出循环
+                    if !self.is_remain_tool_call() {
+                        break;
+                    }
+                } else {
+                    warn!("正在运行");
+                    yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()));
+                    break;
+                }
             }
         }
     }
@@ -173,17 +211,53 @@ impl Chat {
         'b: 'a,
     {
         async_stream::stream! {
-            if self.get_state() == EChatState::Idle {
-                self.state.set_state(EChatState::Running);
-                let stream = chat_stream::ChatStream::handle_chat(&mut self.state, prompt);
-                pin_mut!(stream);
-                while let Some(res) = stream.next().await {
-                    yield res;
+            loop {
+                // 先判断是否超过轮次
+                if self.is_over_context_limit() {
+                    info!("超过对话轮次 {} {}", self.state.get_conversation_turn_info(), self.max_context_num);
+                    self.state.set_state(EChatState::WaitingTurnConfirm);
                 }
-                if self.state.is_need_call_tool() && !self.state.should_ask_for_tool_confirmation()
-            } else {
-                warn!("正在运行");
-                yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()))
+                if self.get_state() == EChatState::Idle || self.get_state() == EChatState::WaitingToolUse {
+                    // 如果有工具调用需要确认，退出等待确认
+                    if self.is_need_tool_confirm() {
+                        warn!("等待工具确认");
+                        self.state.set_state(EChatState::WaitingToolConfirm);
+                        return;
+                    }
+                    self.state.set_state(EChatState::Running);
+                    // 处理工具调用
+                    {
+                        let stream = chat_stream::ChatStream::handle_chat(&mut self.state, prompt);
+                        pin_mut!(stream);
+                        while let Some(res) = stream.next().await {
+                            yield res;
+                        }
+                    }
+                    // 处理聊天
+                    {
+                        // 对话轮数 + 1
+                        self.state.increment_conversation_turn();
+                        let stream = chat_stream::ChatStream::handle_rechat(self);
+                        pin_mut!(stream);
+                        while let Some(res) = stream.next().await {
+                            yield res;
+                        }
+                    }
+                    // 聊天结束可能产生新的工具调用
+                    if self.is_need_tool_confirm() {
+                        warn!("等待工具确认");
+                        self.state.set_state(EChatState::WaitingToolConfirm);
+                        break;
+                    }
+                    // 无工具调用，退出循环
+                    if !self.is_remain_tool_call() {
+                        break;
+                    }
+                } else {
+                    warn!("正在运行");
+                    yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()));
+                    break;
+                }
             }
         }
     }
@@ -192,43 +266,18 @@ impl Chat {
         &'a mut self,
         prompt: &'a str,
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a {
+        self.state.add_message(ModelMessage::user(prompt.to_string()));
         async_stream::stream! {
-            if self.get_state() == EChatState::Idle {
-                self.state.set_state(EChatState::Running);
-                self.state.add_message(ModelMessage::user(prompt.to_string()));
-                let stream = chat_stream::ChatStream::handle_stream_chat(self);
-                pin_mut!(stream);
-                while let Some(res) = stream.next().await {
-                    yield res;
-                }
-            } else {
-                warn!("正在运行");
-                yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()))
-            }
-            self.state.set_state(EChatState::Idle);
-            if self.state.is_need_call_tool() {
-                self.state.set_state(EChatState::WaitingToolConfirm);
+            let stream = self.stream_rechat();
+            pin_mut!(stream);
+            while let Some(res) = stream.next().await {
+                yield res;
             }
         }
-    }
-
-    pub fn call_tool(&self)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {
-        // 获取最后一个消息中的工具调用
-        let tool_calls = self.state.get_tool_calls();
-        chat_tools::ChatTools::call_tool(tool_calls, self.state.get_cancel_token())
     }
 
     pub fn add_message(&mut self, msg: ModelMessage) {
         self.state.add_message(msg);
-    }
-
-    /// 增加对话轮次计数
-    pub fn increment_conversation_turn(&mut self) {
-        self.state.increment_conversation_turn();
-        if self.is_over_context_limit() {
-            info!("超过对话轮次 {} {}", self.state.get_conversation_turn_info(), self.max_context_num);
-            self.state.set_state(EChatState::WaitingTurnConfirm);
-        }
     }
 
     /// 重置对话轮次计数

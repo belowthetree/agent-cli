@@ -27,11 +27,11 @@ impl StateManager {
         app.max_line = 0;
         
         // 提取需要的信息，然后释放锁
-        let (messages, is_waiting_tool, is_waiting_tool_confirmation, is_waiting_context_confirmation, conversation_turn_info) = {
+        let (messages, is_waiting_tool, state, conversation_turn_info) = {
             let ctx = app.chat.lock().unwrap();
             let messages: Vec<_> = ctx.context().iter().cloned().collect();
             let conversation_turn_info = ctx.get_conversation_turn_info();
-            (messages, ctx.is_waiting_tool() && !ctx.is_running(), ctx.is_waiting_tool_confirmation(), ctx.is_waiting_context_confirmation(), conversation_turn_info)
+            (messages, ctx.is_waiting_tool() && !ctx.is_running(), ctx.get_state(), conversation_turn_info)
         };
         
         // 合并聊天消息和信息消息
@@ -85,16 +85,19 @@ impl StateManager {
         if is_waiting_tool {
             Self::add_system_message_block(app, "工具调用次数达到设置上限，是否继续，输入 yes/y 继续，no/n 中断".into());
         }
-        
-        // 如果正在等待工具调用确认
-        if is_waiting_tool_confirmation {
-            Self::add_system_message_block(app, "检测到工具调用，是否执行？输入 yes/y 执行，no/n 取消".into());
-        }
-        
-        // 如果正在等待对话轮次确认
-        if is_waiting_context_confirmation {
-            let (current_turn, max_turn) = conversation_turn_info;
-            Self::add_system_message_block(app, format!("对话轮次已达到上限 ({}/{}), 是否继续？输入 yes/y 继续并重置计数，no/n 停止", current_turn, max_turn));
+
+        use crate::chat::EChatState;
+        match state {
+            // 等待工具确认
+            EChatState::WaitingToolConfirm => {
+                Self::add_system_message_block(app, "检测到工具调用，是否执行？输入 yes/y 执行，no/n 取消".into());
+            },
+            // 等待轮次确认
+            EChatState::WaitingTurnConfirm => {
+                let (current_turn, max_turn) = conversation_turn_info;
+                Self::add_system_message_block(app, format!("对话轮次已达到上限 ({}/{}), 是否继续？输入 yes/y 继续并重置计数，no/n 停止", current_turn, max_turn));
+            },
+            _=>{}
         }
         
         Self::update_scrollbar_state(app);

@@ -171,7 +171,6 @@ print(response)
 
 ```json
 {
-  "max_tool_try": number,           // 最大工具尝试次数
   "max_context_num": number,        // 最大上下文数量
   "max_tokens": number,             // 最大token数
   "ask_before_tool_execution": boolean,  // 工具执行前是否询问

@@ -4,7 +4,7 @@ use futures::{pin_mut, StreamExt};
 use log::{error, info};
 
 use crate::{
-    chat::{Chat, StreamedChatResponse},
+    chat::{Chat, EChatState, StreamedChatResponse},
     model::param::ModelMessage,
     tui::{app::ETuiEvent, ui::inputarea::InputArea},
 };
@@ -29,7 +29,7 @@ impl AppChat {
         // 检查是否正在等待对话轮次确认
         {
             let guard = selfchat.lock().unwrap();
-            if guard.is_waiting_context_confirmation() {
+            if guard.get_state() != EChatState::Idle {
                 // 如果正在等待确认，不处理新的聊天
                 return;
             }
@@ -43,9 +43,7 @@ impl AppChat {
         
         // 添加用户输入到聊天上下文
         Self::add_user_input_to_context(&selfchat, &input, &mut chat);
-        
-        // 锁定聊天状态并启动流式响应
-        selfchat.lock().unwrap().lock();
+
         let stream = chat.stream_rechat();
         
         // 发送初始滚动信号
@@ -62,8 +60,6 @@ impl AppChat {
             for message in chat.context() {
                 guard.add_message(message.clone());
             }
-            // 对话轮次是直接改动的 selfchat，因此无需再更新
-            guard.unlock();
         }
     }
 
@@ -151,13 +147,8 @@ impl AppChat {
                 // 增加对话轮次计数（模型每次回复时增加1）
                 let mut ctx = selfchat.lock().unwrap();
                 ctx.increment_conversation_turn();
-                
                 // 检查是否超过最大对话轮次
                 info!("对话轮次 {:?}", ctx.get_conversation_turn_info());
-                if ctx.is_over_context_limit() {
-                    // 设置等待确认状态
-                    ctx.set_waiting_context_confirmation(true);
-                }
             }
         }
     }
@@ -199,51 +190,29 @@ impl AppChat {
             let guard = selfchat.lock().unwrap();
             guard.clone()
         };
+
+        // 执行工具调用
+        let stream = chat.call_tool();
+        pin_mut!(stream);
         
-        // 锁定聊天状态
-        selfchat.lock().unwrap().lock();
+        // 发送滚动信号
+        Self::send_scroll_signal(&tx);
         
-        // 获取最后一个消息中的工具调用
-        let tool_calls = {
-            let guard = selfchat.lock().unwrap();
-            if let Some(last) = guard.context().last() {
-                if let Some(tools) = &last.tool_calls {
-                    tools.clone()
-                } else {
-                    vec![]
+        // 处理工具响应
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(tool_response) => {
+                    // 添加工具响应到上下文
+                    let mut guard = selfchat.lock().unwrap();
+                    guard.add_message(tool_response);
+                    // 发送滚动信号
+                    Self::send_scroll_signal(&tx);
                 }
-            } else {
-                vec![]
-            }
-        };
-        
-        if !tool_calls.is_empty() {
-            // 执行工具调用
-            let stream = chat.call_tool(tool_calls);
-            pin_mut!(stream);
-            
-            // 发送滚动信号
-            Self::send_scroll_signal(&tx);
-            
-            // 处理工具响应
-            while let Some(res) = stream.next().await {
-                match res {
-                    Ok(tool_response) => {
-                        // 添加工具响应到上下文
-                        let mut guard = selfchat.lock().unwrap();
-                        guard.add_message(tool_response);
-                        // 发送滚动信号
-                        Self::send_scroll_signal(&tx);
-                    }
-                    Err(e) => {
-                        error!("工具调用错误: {}", e);
-                        break;
-                    }
+                Err(e) => {
+                    error!("工具调用错误: {}", e);
+                    break;
                 }
             }
         }
-        
-        // 解锁聊天状态
-        selfchat.lock().unwrap().unlock();
     }
 }

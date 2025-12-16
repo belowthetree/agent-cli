@@ -3,7 +3,7 @@
 use super::base_handler::RequestHandler;
 use crate::remote::protocol::{RemoteRequest, RemoteResponse, InputType};
 use crate::config::Config;
-use crate::chat::Chat;
+use crate::chat::{Chat, EChatState};
 use tokio_tungstenite::WebSocketStream;
 use tokio::net::TcpStream;
 use log::{info, warn};
@@ -27,7 +27,7 @@ impl RequestHandler for ToolConfirmationHandler {
         info!("Handling tool confirmation response: {} - tool: {}, approved: {}", 
             request.request_id, name, approved);
 
-        if chat.is_waiting_tool_confirmation() {
+        if chat.get_state() == EChatState::WaitingToolConfirm {
             // 验证工具名称和参数是否匹配
             let mut validation_error = None;
             
@@ -73,7 +73,11 @@ impl RequestHandler for ToolConfirmationHandler {
             }
             
             // 设置工具确认结果
-            chat.set_tool_confirmation_result(*approved);
+            if *approved {
+                chat.confirm();
+            } else {
+                chat.reject_tool_call();
+            }
             
             // 如果有原因，记录下来
             if let Some(reason) = reason {

@@ -1,6 +1,22 @@
+use log::info;
+
 use crate::client::chat_client::ChatClient;
 use crate::mcp::McpTool;
-use crate::model::param::ModelMessage;
+use crate::model::param::{ModelMessage, ToolCall};
+
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub enum EChatState {
+    // 正常状态
+    Idle,
+    // 正在接收模型消息
+    Running,
+    // 等待工具执行确认
+    WaitingToolConfirm,
+    // 等待工具调用
+    WaitingToolUse,
+    // 等待继续对话确认
+    WaitingTurnConfirm,
+}
 
 /// Chat 状态管理模块
 /// 负责管理聊天状态、上下文和配置
@@ -8,21 +24,14 @@ use crate::model::param::ModelMessage;
 pub struct ChatState {
     pub client: ChatClient,
     pub context: Vec<ModelMessage>,
-    max_tool_try: usize,
     cancel_token: tokio_util::sync::CancellationToken,
-    running: bool,
+    state: EChatState,
     /// token限制
     max_tokens: Option<u32>,
     /// 是否在工具执行前询问用户确认
     ask_before_tool_execution: bool,
-    /// 是否正在等待用户确认工具调用
-    waiting_tool_confirmation: bool,
     /// 对话轮次统计
     conversation_turn_count: usize,
-    /// 最大对话轮次数
-    max_context_num: usize,
-    /// 是否正在等待对话轮次确认
-    waiting_context_confirmation: bool,
 }
 
 impl ChatState {
@@ -30,39 +39,28 @@ impl ChatState {
     pub fn new(
         client: ChatClient,
         context: Vec<ModelMessage>,
-        max_tool_try: usize,
         max_tokens: Option<u32>,
         ask_before_tool_execution: bool,
-        max_context_num: usize,
     ) -> Self {
         Self {
             client,
             context,
-            max_tool_try,
             cancel_token: tokio_util::sync::CancellationToken::new(),
-            running: false,
+            state: EChatState::Idle,
             max_tokens,
             ask_before_tool_execution,
-            waiting_tool_confirmation: false,
             conversation_turn_count: 0,
-            max_context_num,
-            waiting_context_confirmation: false,
         }
     }
 
     /// 检查是否正在运行
-    pub fn is_running(&self) -> bool {
-        self.running
+    pub fn get_state(&self)->EChatState {
+        self.state.clone()
     }
 
-    /// 锁定状态（开始运行）
-    pub fn lock(&mut self) {
-        self.running = true;
-    }
-
-    /// 解锁状态（停止运行）
-    pub fn unlock(&mut self) {
-        self.running = false;
+    pub fn set_state(&mut self, state: EChatState) {
+        info!("设置状态 {:?}", state);
+        self.state = state;
     }
 
     /// 取消操作
@@ -95,35 +93,6 @@ impl ChatState {
         self.ask_before_tool_execution
     }
 
-    /// 设置等待工具确认状态
-    pub fn set_waiting_tool_confirmation(&mut self, waiting: bool) {
-        self.waiting_tool_confirmation = waiting;
-    }
-
-    /// 检查是否正在等待工具确认
-    pub fn is_waiting_tool_confirmation(&self) -> bool {
-        self.waiting_tool_confirmation
-    }
-
-    /// 确认工具调用
-    pub fn confirm_tool_call(&mut self) {
-        self.waiting_tool_confirmation = false;
-    }
-
-    /// 拒绝工具调用
-    pub fn reject_tool_call(&mut self) {
-        self.waiting_tool_confirmation = false;
-    }
-
-    /// 设置工具确认结果
-    pub fn set_tool_confirmation_result(&mut self, approved: bool) {
-        if approved {
-            self.confirm_tool_call();
-        } else {
-            self.reject_tool_call();
-        }
-    }
-
     /// 添加消息到上下文（支持批处理）
     pub fn add_message(&mut self, msg: ModelMessage) {
         self.context.push(msg);
@@ -139,24 +108,9 @@ impl ChatState {
         self.conversation_turn_count = 0;
     }
 
-    /// 检查是否超过最大对话轮次
-    pub fn is_over_context_limit(&self) -> bool {
-        self.conversation_turn_count >= self.max_context_num
-    }
-
-    /// 设置等待对话轮次确认状态
-    pub fn set_waiting_context_confirmation(&mut self, waiting: bool) {
-        self.waiting_context_confirmation = waiting;
-    }
-
-    /// 检查是否正在等待对话轮次确认
-    pub fn is_waiting_context_confirmation(&self) -> bool {
-        self.waiting_context_confirmation
-    }
-
     /// 获取当前对话轮次统计
-    pub fn get_conversation_turn_info(&self) -> (usize, usize) {
-        (self.conversation_turn_count, self.max_context_num)
+    pub fn get_conversation_turn_info(&self) -> usize {
+        self.conversation_turn_count
     }
 
     /// 检查token使用是否超过限制
@@ -185,11 +139,6 @@ impl ChatState {
         false
     }
 
-    /// 获取最大工具尝试次数
-    pub fn max_tool_try(&self) -> usize {
-        self.max_tool_try
-    }
-
     /// 获取上下文
     pub fn context(&self) -> &Vec<ModelMessage> {
         &self.context
@@ -203,5 +152,26 @@ impl ChatState {
     /// 获取客户端
     pub fn client(&self) -> &ChatClient {
         &self.client
+    }
+
+    pub fn is_need_call_tool(&self)->bool {
+        if let Some(last) = self.context().last() {
+            if let Some(_) = &last.tool_calls {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn get_tool_calls(&self)->Vec<ToolCall> {
+        if let Some(last) = self.context().last() {
+            if let Some(tools) = &last.tool_calls {
+                tools.clone()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
     }
 }

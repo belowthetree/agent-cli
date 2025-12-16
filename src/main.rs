@@ -161,8 +161,7 @@ mod tests {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
         let mut chat = Chat::new(config::Config::local().unwrap())
-            .tools(mcp::get_basic_tools())
-            .max_try(1);
+            .tools(mcp::get_basic_tools());
         let res = chat.chat("你好，帮我查一下github提交信息");
         handle_output(res).await;
     }

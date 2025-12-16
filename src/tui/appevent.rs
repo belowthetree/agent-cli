@@ -6,7 +6,7 @@ use std::{
 use log::{error, info};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
-use crate::tui::app::{App, ETuiEvent};
+use crate::{chat::EChatState, tui::app::{App, ETuiEvent}};
 
 /// 事件处理器，负责处理键盘事件和事件监听
 pub struct AppEvent;
@@ -163,68 +163,57 @@ impl AppEvent {
         
         let mut chat = app.chat.lock().unwrap();
         if !chat.is_running() {
-            // 检查是否正在等待对话轮次确认
-            if chat.is_waiting_context_confirmation() {
+            match chat.get_state() {
+                EChatState::WaitingToolConfirm => {
+                    let res = app.input.content.to_lowercase();
+                    app.input.clear();
+                    if res == "y" || res == "yes" {
+                        info!("确认工具调用");
+                        chat.confirm();
+                        // 继续执行工具调用
+                        tokio::spawn(crate::tui::appchat::AppChat::handle_tool_execution(
+                            app.chat.clone(),
+                            app.event_tx.clone(),
+                        ));
+                    } else if res == "no" || res == "n" {
+                        chat.reject_tool_call();
+                    }
+                },
                 // 处理对话轮次确认
-                let res = app.input.content.to_lowercase();
-                app.input.clear();
-                if res == "y" || res == "yes" {
-                    info!("重置对话");
-                    // 用户选择继续，重置对话轮次计数
-                    chat.reset_conversation_turn();
-                    chat.set_waiting_context_confirmation(false);
-                    // 继续处理当前输入
-                    let input_clone = app.input.clone();
-                    let chat_clone = app.chat.clone();
-                    let event_tx_clone = app.event_tx.clone();
-                    tokio::spawn(async move {
-                        crate::tui::appchat::AppChat::handle_chat(
-                            chat_clone,
-                            input_clone,
-                            event_tx_clone,
-                        ).await;
-                    });
-                } else if res == "no" || res == "n" {
-                    // 用户选择停止，清除等待状态但不重置计数
-                    chat.set_waiting_context_confirmation(false);
+                EChatState::WaitingTurnConfirm => {
+                    let res = app.input.content.to_lowercase();
+                    app.input.clear();
+                    if res == "y" || res == "yes" {
+                        info!("确认重置对话");
+                        // 用户选择继续，重置对话轮次计数
+                        chat.reset_conversation_turn();
+                        chat.confirm();
+                        // 继续处理当前输入
+                        let input_clone = app.input.clone();
+                        let chat_clone = app.chat.clone();
+                        let event_tx_clone = app.event_tx.clone();
+                        tokio::spawn(async move {
+                            crate::tui::appchat::AppChat::handle_chat(
+                                chat_clone,
+                                input_clone,
+                                event_tx_clone,
+                            ).await;
+                        });
+                    } else if res == "no" || res == "n" {
+                        // 用户选择停止，清除等待状态但不重置计数
+                        chat.confirm();
+                    }
+                },
+                EChatState::Idle => {
+                    info!("Idle 状态，开始对话");
+                    tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
+                        app.chat.clone(),
+                        app.input.clone(),
+                        app.event_tx.clone(),
+                    ));
                 }
+                _ => {}
             }
-            // 检查是否正在等待工具调用确认
-            else if chat.is_waiting_tool_confirmation() {
-                // 处理工具调用确认
-                let res = app.input.content.to_lowercase();
-                app.input.clear();
-                if res == "y" || res == "yes" {
-                    chat.confirm_tool_call();
-                    // 继续执行工具调用
-                    tokio::spawn(crate::tui::appchat::AppChat::handle_tool_execution(
-                        app.chat.clone(),
-                        app.event_tx.clone(),
-                    ));
-                } else if res == "no" || res == "n" {
-                    chat.reject_tool_call();
-                }
-            } else if chat.is_waiting_tool() {
-                // 先检查模型是否在等待调用工具，可能存在工具调用次数用尽退出对话的情况
-                // yes / y 为继续，n / no 为清除
-                let res = app.input.content.to_lowercase();
-                app.input.clear();
-                if res == "y" || res == "yes" {
-                    tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
-                        app.chat.clone(),
-                        app.input.clone(),
-                        app.event_tx.clone(),
-                    ));
-                } else if res == "no" || res == "n" {
-                    chat.reject_tool_call();
-                }
-                } else {
-                    tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
-                        app.chat.clone(),
-                        app.input.clone(),
-                        app.event_tx.clone(),
-                    ));
-                }
             app.cursor_offset = 0;
             app.input.clear();
         }
@@ -246,6 +235,7 @@ impl AppEvent {
                 if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
                     error!("{:?}", e);
                 }
+                info!("输入 {:?}", key);
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Esc => Self::handle_escape_key(app),

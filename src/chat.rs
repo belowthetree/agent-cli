@@ -1,30 +1,29 @@
-use std::cmp::max;
-
-use futures::Stream;
-use log::info;
+use futures::{Stream, StreamExt, pin_mut};
+use log::{info, warn};
 
 use crate::config::{self, Config};
 use crate::mcp::McpTool;
-use crate::model::param::{ModelMessage, ToolCall};
+use crate::model::param::{ModelMessage};
 use crate::prompt;
 
 mod chat_state;
 mod chat_stream;
 mod chat_tools;
 
+pub use chat_state::EChatState;
 pub use chat_state::ChatState;
 pub use chat_stream::{StreamedChatResponse};
 
 #[derive(Clone)]
 pub struct Chat {
     state: ChatState,
+    max_context_num: usize,
 }
 
 /// Chat 构建器，用于改进初始化和配置验证
 pub struct ChatBuilder {
     config: Config,
     tools: Vec<McpTool>,
-    max_tool_try: Option<usize>,
     max_tokens: Option<Option<u32>>,
     ask_before_tool_execution: Option<bool>,
     max_context_num: Option<usize>,
@@ -36,7 +35,6 @@ impl ChatBuilder {
         Self {
             config,
             tools: Vec::new(),
-            max_tool_try: None,
             max_tokens: None,
             ask_before_tool_execution: None,
             max_context_num: None,
@@ -51,15 +49,9 @@ impl ChatBuilder {
         }
 
         // 使用构建器中的值或回退到配置中的默认值
-        let max_tool_try = self.max_tool_try.unwrap_or(max(self.config.max_tool_try, 0));
         let max_tokens = self.max_tokens.unwrap_or(self.config.max_tokens);
         let ask_before_tool_execution = self.ask_before_tool_execution.unwrap_or(self.config.ask_before_tool_execution);
         let max_context_num = self.max_context_num.unwrap_or(self.config.max_context_num);
-
-        // 验证最大工具尝试次数
-        if max_tool_try > 10 {
-            return Err("最大工具尝试次数不能超过10".to_string());
-        }
 
         // 验证最大对话轮次数
         if max_context_num == 0 {
@@ -81,13 +73,11 @@ impl ChatBuilder {
         let state = ChatState::new(
             client,
             context,
-            max_tool_try,
             max_tokens,
             ask_before_tool_execution,
-            max_context_num,
         );
 
-        Ok(Chat { state })
+        Ok(Chat { state, max_context_num })
     }
 }
 
@@ -109,15 +99,7 @@ impl Chat {
     }
 
     pub fn is_running(&self) -> bool {
-        self.state.is_running()
-    }
-
-    pub fn lock(&mut self) {
-        self.state.lock();
-    }
-
-    pub fn unlock(&mut self) {
-        self.state.unlock();
+        self.state.get_state() == EChatState::Running
     }
 
     pub fn cancel(&self) {
@@ -127,6 +109,18 @@ impl Chat {
     /// 获取取消令牌的副本，用于在流处理期间取消聊天
     pub fn get_cancel_token(&self) -> tokio_util::sync::CancellationToken {
         self.state.get_cancel_token()
+    }
+
+    pub fn get_state(&self)->EChatState {
+        self.state.get_state()
+    }
+
+    pub fn confirm(&mut self) {
+        if self.get_state() == EChatState::WaitingToolConfirm {
+            self.state.set_state(EChatState::WaitingToolUse);
+        } else {
+            self.state.set_state(EChatState::Idle);
+        }
     }
 
     pub fn tools(mut self, tools: Vec<McpTool>) -> Self {
@@ -140,58 +134,87 @@ impl Chat {
         self.state.set_tools(tools);
     }
 
-    #[allow(unused)]
-    pub fn max_try(mut self, max_try: usize) -> Self {
-        // 注意：这个方法现在无效，因为 max_tool_try 在 ChatState 中是只读的
-        // 如果需要修改，需要在 ChatState 中添加相应方法
-        self
-    }
-
     pub fn is_waiting_tool(&self) -> bool {
         self.state.is_waiting_tool()
     }
 
-    /// 检查是否正在等待工具确认
-    pub fn is_waiting_tool_confirmation(&self) -> bool {
-        self.state.is_waiting_tool_confirmation()
-    }
-
-    /// 确认工具调用
-    pub fn confirm_tool_call(&mut self) {
-        self.state.confirm_tool_call();
+    // 工具调用需要确认或者轮数超了都不能
+    pub fn is_tool_call_need_confirm(&self)-> bool {
+        self.state.should_ask_for_tool_confirmation() && self.is_over_context_limit()
     }
 
     /// 拒绝工具调用
     pub fn reject_tool_call(&mut self) {
-        self.state.reject_tool_call();
-    }
-
-    /// 设置工具确认结果
-    pub fn set_tool_confirmation_result(&mut self, approved: bool) {
-        self.state.set_tool_confirmation_result(approved);
+        self.state.set_state(EChatState::Idle);
+        for call in self.state.get_tool_calls() {
+            self.add_message(ModelMessage::tool("用户拒绝调用", call));
+        }
     }
 
     // 用已有的上下文再次发送给模型，用于突然中断的情况
     pub fn stream_rechat(&mut self) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        chat_stream::ChatStream::handle_rechat(&mut self.state)
+        async_stream::stream! {
+            if self.get_state() == EChatState::Idle {
+                self.state.set_state(EChatState::Running);
+                let stream = chat_stream::ChatStream::handle_rechat(self);
+                pin_mut!(stream);
+                while let Some(res) = stream.next().await {
+                    yield res;
+                }
+            } else {
+                warn!("正在运行");
+                yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()))
+            }
+        }
     }
 
     pub fn chat<'a, 'b>(&'a mut self, prompt: &'b str) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a 
     where
         'b: 'a,
     {
-        chat_stream::ChatStream::handle_chat(&mut self.state, prompt)
+        async_stream::stream! {
+            if self.get_state() == EChatState::Idle {
+                self.state.set_state(EChatState::Running);
+                let stream = chat_stream::ChatStream::handle_chat(&mut self.state, prompt);
+                pin_mut!(stream);
+                while let Some(res) = stream.next().await {
+                    yield res;
+                }
+                if self.state.is_need_call_tool() && !self.state.should_ask_for_tool_confirmation()
+            } else {
+                warn!("正在运行");
+                yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()))
+            }
+        }
     }
 
-    pub fn stream_chat(
-        &mut self,
-        prompt: &str,
-    ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        self.state.add_message(ModelMessage::user(prompt.to_string()));
-        chat_stream::ChatStream::handle_stream_chat(&mut self.state)
+    pub fn stream_chat<'a>(
+        &'a mut self,
+        prompt: &'a str,
+    ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a {
+        async_stream::stream! {
+            if self.get_state() == EChatState::Idle {
+                self.state.set_state(EChatState::Running);
+                self.state.add_message(ModelMessage::user(prompt.to_string()));
+                let stream = chat_stream::ChatStream::handle_stream_chat(self);
+                pin_mut!(stream);
+                while let Some(res) = stream.next().await {
+                    yield res;
+                }
+            } else {
+                warn!("正在运行");
+                yield Err(anyhow::anyhow!("Chat is not idle, cannot rechat. Current state: {:?}", self.get_state()))
+            }
+            self.state.set_state(EChatState::Idle);
+            if self.state.is_need_call_tool() {
+                self.state.set_state(EChatState::WaitingToolConfirm);
+            }
+        }
     }
 
-    pub fn call_tool(&self, tool_calls: Vec<ToolCall>)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {
+    pub fn call_tool(&self)->impl Stream<Item = anyhow::Result<ModelMessage>> + '_ {
+        // 获取最后一个消息中的工具调用
+        let tool_calls = self.state.get_tool_calls();
         chat_tools::ChatTools::call_tool(tool_calls, self.state.get_cancel_token())
     }
 
@@ -202,6 +225,10 @@ impl Chat {
     /// 增加对话轮次计数
     pub fn increment_conversation_turn(&mut self) {
         self.state.increment_conversation_turn();
+        if self.is_over_context_limit() {
+            info!("超过对话轮次 {} {}", self.state.get_conversation_turn_info(), self.max_context_num);
+            self.state.set_state(EChatState::WaitingTurnConfirm);
+        }
     }
 
     /// 重置对话轮次计数
@@ -211,22 +238,12 @@ impl Chat {
 
     /// 检查是否超过最大对话轮次
     pub fn is_over_context_limit(&self) -> bool {
-        self.state.is_over_context_limit()
-    }
-
-    /// 设置等待对话轮次确认状态
-    pub fn set_waiting_context_confirmation(&mut self, waiting: bool) {
-        self.state.set_waiting_context_confirmation(waiting);
-    }
-
-    /// 检查是否正在等待对话轮次确认
-    pub fn is_waiting_context_confirmation(&self) -> bool {
-        self.state.is_waiting_context_confirmation()
+        self.state.get_conversation_turn_info() >= self.max_context_num
     }
 
     /// 获取当前对话轮次统计
     pub fn get_conversation_turn_info(&self) -> (usize, usize) {
-        self.state.get_conversation_turn_info()
+        (self.state.get_conversation_turn_info(), self.max_context_num)
     }
 
     /// 获取聊天上下文

@@ -1,6 +1,7 @@
 //! 共享工具和辅助函数模块
 
 use crate::chat::Chat;
+use crate::chat::EChatState;
 use crate::chat::StreamedChatResponse;
 use crate::remote::protocol::{RemoteResponse, ResponseContent, TokenUsage, RemoteRequest, InputType};
 use futures::{SinkExt, StreamExt};
@@ -234,7 +235,7 @@ pub async fn process_streaming_chat_with_ws(
     } // stream is dropped here, releasing the mutable borrow on chat
     
     // Check if chat is waiting for tool confirmation
-    if chat.is_waiting_tool_confirmation() {
+    if chat.get_state() == EChatState::WaitingToolConfirm {
         // Get the last tool call from context
         if let Some(last_msg) = chat.context().last() {
             if let Some(tool_calls) = &last_msg.tool_calls {

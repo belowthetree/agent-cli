@@ -128,7 +128,6 @@ impl App {
         })?;
         loop {
             if let Ok(ev) = self.event_rx.try_recv() {
-                info!("收到事件 {:?}", ev);
                 if ev == ETuiEvent::Exit {
                     info!("收到退出 {:?}", ev);
                     break;

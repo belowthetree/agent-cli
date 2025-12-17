@@ -22,7 +22,7 @@ impl AppChat {
     /// 4. 发送滚动到底部的信号
     /// 5. 更新聊天上下文以包含完整的响应和token使用信息
     pub async fn handle_chat(
-        idx: usize,
+        mut idx: usize,
         selfchat: Arc<Mutex<Chat>>,
         input: InputArea,
         tx: mpsc::Sender<ETuiEvent>,
@@ -40,24 +40,19 @@ impl AppChat {
                 .unwrap()
                 .add_message(ModelMessage::user(input.content.clone()));
             send_event(&tx, ETuiEvent::AddMessage(ModelMessage::user(input.content.clone())));
+            idx += 1;
         }
 
         let mut chat = selfchat.lock().unwrap().clone();
+        selfchat.lock().unwrap().run();
         let stream = chat.stream_rechat();
         // 发送初始滚动信号
         send_event(&tx, ETuiEvent::ScrollToBottom);
         // 处理流式响应
-        Self::process_stream_responses(idx + 1, stream, &tx).await;
+        Self::process_stream_responses(idx, stream, &tx).await;
 
         // 更新聊天上下文
-        {
-            let mut guard = selfchat.lock().unwrap();
-            // 清空当前上下文，然后添加所有消息
-            guard.clear_context();
-            for message in chat.context() {
-                guard.add_message(message.clone());
-            }
-        }
+        *selfchat.lock().unwrap() = chat;
     }
 
     /// 处理流式响应错误
@@ -134,9 +129,11 @@ impl AppChat {
             info!("正忙碌");
             return;
         }
+        selfchat.lock().unwrap().run();
         let stream = guard.stream_rechat();
         send_event(&tx, ETuiEvent::ScrollToBottom);
         // 处理流式响应
         Self::process_stream_responses(idx, stream, &tx).await;
+        *selfchat.lock().unwrap() = guard;
     }
 }

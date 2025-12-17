@@ -27,21 +27,16 @@ impl StateManager {
         app.max_line = 0;
         
         // 提取需要的信息，然后释放锁
-        let (is_remain_tool_call, state, conversation_turn_info) = {
+        let (state, conversation_turn_info) = {
             let ctx = app.chat.lock().unwrap();
             let conversation_turn_info = ctx.get_conversation_turn_info();
-            (ctx.is_remain_tool_call() && !ctx.is_running(), ctx.get_state(), conversation_turn_info)
+            (ctx.get_state(), conversation_turn_info)
         };
         
         // 为所有消息创建MessageBlock
         let messages = app.messages.clone();
         for msg in messages {
             Self::add_block(app, MessageBlock::new(msg, app.width));
-        }
-        
-        // 如果工具调用达到上限而中断
-        if is_remain_tool_call {
-            Self::add_system_message_block(app, "工具调用次数达到设置上限，是否继续，输入 yes/y 继续，no/n 中断".into());
         }
 
         use crate::chat::EChatState;

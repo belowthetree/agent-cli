@@ -22,7 +22,7 @@ impl RequestHandler for InterruptHandler {
     ) -> RemoteResponse {
         info!("Handling interrupt request: {}", request.request_id);
         if chat.is_running() {
-            chat.cancel();
+            chat.get_cancel_token().cancel();
             info!("Chat interrupted successfully");
             return RemoteResponse {
                 request_id: request.request_id,

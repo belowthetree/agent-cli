@@ -162,7 +162,7 @@ impl ClientHandler {
         info!("Handling interrupt request: {}", request_id);
 
         if self.chat.is_running() {
-            self.chat.cancel();
+            self.chat.get_cancel_token().cancel();
             info!("Chat interrupted successfully");
             return RemoteResponse {
                 request_id: request_id.to_string(),

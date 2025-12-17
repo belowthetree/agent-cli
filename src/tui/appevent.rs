@@ -3,7 +3,7 @@ use std::{
     sync::{mpsc},
 };
 
-use log::{error, info};
+use log::{error, info, warn};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
 use crate::{chat::EChatState, tui::app::{App, ETuiEvent}};
@@ -37,15 +37,18 @@ impl AppEvent {
 
     /// 处理ESC键：取消运行或退出应用
     pub fn handle_escape_key(app: &mut App) {
+        info!("收到 esc");
         // 如果选项对话框可见，优先取消选项对话框
         if app.option_dialog.visible {
             app.option_dialog.hide();
             return;
         }
-        
-        let chat = app.chat.lock().unwrap();
-        if chat.is_running() {
-            chat.cancel();
+        // 拿出来避免死锁
+        let (is_running, token) = {
+            (app.chat.lock().unwrap().is_running(), app.chat.lock().unwrap().get_cancel_token())
+        };
+        if is_running {
+            token.cancel();
         } else {
             app.event_tx.send(ETuiEvent::Exit).unwrap();
         }
@@ -254,11 +257,13 @@ impl AppEvent {
                 }
             }
             ETuiEvent::AddMessage(model_message) => {
+                info!("AddMessage {:?}", model_message);
                 // 处理信息消息
                 app.messages.push(model_message);
                 app.refresh();
             }
             ETuiEvent::UpdateMessage(idx, msg) => {
+                info!("UpdateMessage {} {:?}", idx, msg);
                 if app.messages.len() > idx {
                     app.messages[idx].add_content(msg.content);
                     app.messages[idx].add_think(msg.think);
@@ -269,6 +274,8 @@ impl AppEvent {
                     }
                 } else if app.messages.len() == idx {
                     app.messages.push(msg);
+                } else {
+                    warn!("更新信息的下标有误 {}", idx);
                 }
             }
             ETuiEvent::ScrollToBottom => {

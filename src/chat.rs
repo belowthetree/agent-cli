@@ -102,8 +102,8 @@ impl Chat {
         self.state.get_state() == EChatState::Running
     }
 
-    pub fn cancel(&self) {
-        self.state.cancel();
+    pub fn run(&mut self) {
+        self.state.set_state(EChatState::Running);
     }
 
     /// 获取取消令牌的副本，用于在流处理期间取消聊天

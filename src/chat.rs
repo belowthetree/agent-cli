@@ -186,7 +186,6 @@ impl Chat {
                         while let Some(res) = stream.next().await {
                             yield res;
                         }
-                        info!("对话结束");
                     }
                     // 聊天结束可能产生新的工具调用
                     if self.is_need_tool_confirm() {

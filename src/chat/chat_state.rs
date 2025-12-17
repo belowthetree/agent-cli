@@ -1,4 +1,5 @@
 use log::info;
+use tokio_util::sync::CancellationToken;
 
 use crate::client::chat_client::ChatClient;
 use crate::mcp::McpTool;
@@ -60,6 +61,11 @@ impl ChatState {
 
     pub fn set_state(&mut self, state: EChatState) {
         info!("设置状态 {:?}", state);
+        // 重置下取消令牌
+        if state == EChatState::Idle {
+            self.cancel_token = CancellationToken::new();
+            info!("刷新 {}", self.cancel_token.is_cancelled());
+        }
         self.state = state;
     }
 

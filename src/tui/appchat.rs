@@ -28,9 +28,11 @@ impl AppChat {
         tx: mpsc::Sender<ETuiEvent>,
     ) {
         info!("处理聊天");
-        if selfchat.lock().unwrap().get_state() != EChatState::Idle {
-            info!("正忙碌");
-            return;
+        {
+            if selfchat.lock().unwrap().get_state() != EChatState::Idle {
+                info!("正忙碌");
+                return;
+            }
         }
         // 获取聊天实例并克隆
         if !input.content.is_empty() {
@@ -43,8 +45,10 @@ impl AppChat {
             idx += 1;
         }
 
-        let mut chat = selfchat.lock().unwrap().clone();
-        selfchat.lock().unwrap().run();
+        let mut chat = { selfchat.lock().unwrap().clone() };
+        {
+            selfchat.lock().unwrap().run();
+        }
         let stream = chat.stream_rechat();
         // 发送初始滚动信号
         send_event(&tx, ETuiEvent::ScrollToBottom);
@@ -62,38 +66,10 @@ impl AppChat {
         send_event(&tx, ETuiEvent::AddMessage(msg));
     }
 
-    /// 处理流式响应
-    async fn handle_stream_response(idx: usize, response: StreamedChatResponse, tx: &mpsc::Sender<ETuiEvent>) {
-        match response {
-            StreamedChatResponse::Text(text) => {
-                if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant(text, "", vec![]))) {
-                    error!("{:?}", e);
-                }
-            }
-            StreamedChatResponse::ToolCall(tool_call) => {
-                if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant("", "", vec![tool_call]))) {
-                    error!("{:?}", e);
-                }
-            }
-            StreamedChatResponse::Reasoning(think) => {
-                if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant("", think, vec![]))) {
-                    error!("{:?}", e);
-                }
-            }
-            StreamedChatResponse::ToolResponse(tool) => {
-                if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, tool)) {
-                    error!("{:?}", e);
-                }
-            }
-            StreamedChatResponse::End => {
-            }
-        }
-    }
-
     /// 处理流式响应循环
     /// 传入 idx 为当前消息的插入位置
     async fn process_stream_responses(
-        idx: usize,
+        mut idx: usize,
         stream: impl futures::Stream<Item = Result<StreamedChatResponse, impl std::fmt::Display>>,
         tx: &mpsc::Sender<ETuiEvent>,
     ) {
@@ -104,7 +80,31 @@ impl AppChat {
             send_event(&tx, ETuiEvent::ScrollToBottom);
             match stream.next().await {
                 Some(Ok(response)) => {
-                    Self::handle_stream_response(idx, response, tx).await;
+                    match response {
+                        StreamedChatResponse::Text(text) => {
+                            if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant(text, "", vec![]))) {
+                                error!("{:?}", e);
+                            }
+                        }
+                        StreamedChatResponse::ToolCall(tool_call) => {
+                            if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant("", "", vec![tool_call]))) {
+                                error!("{:?}", e);
+                            }
+                        }
+                        StreamedChatResponse::Reasoning(think) => {
+                            if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::assistant("", think, vec![]))) {
+                                error!("{:?}", e);
+                            }
+                        }
+                        StreamedChatResponse::ToolResponse(tool) => {
+                            if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, tool)) {
+                                error!("{:?}", e);
+                            }
+                        }
+                        StreamedChatResponse::End => {
+                            idx += 1;
+                        }
+                    }
                 }
                 Some(Err(err)) => {
                     Self::handle_stream_error(err, tx);
@@ -124,12 +124,14 @@ impl AppChat {
         tx: mpsc::Sender<ETuiEvent>,
     ) {
         // 检查是否正在等待对话轮次确认
-        let mut guard = selfchat.lock().unwrap().clone();
+        let mut guard = {selfchat.lock().unwrap().clone()};
         if guard.get_state() != EChatState::Idle {
             info!("正忙碌");
             return;
         }
-        selfchat.lock().unwrap().run();
+        {
+            selfchat.lock().unwrap().run();
+        }
         let stream = guard.stream_rechat();
         send_event(&tx, ETuiEvent::ScrollToBottom);
         // 处理流式响应

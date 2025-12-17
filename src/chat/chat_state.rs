@@ -63,11 +63,6 @@ impl ChatState {
         self.state = state;
     }
 
-    /// 取消操作
-    pub fn cancel(&self) {
-        self.cancel_token.cancel();
-    }
-
     /// 获取取消令牌的副本
     pub fn get_cancel_token(&self) -> tokio_util::sync::CancellationToken {
         self.cancel_token.clone()

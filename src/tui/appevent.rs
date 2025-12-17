@@ -5,6 +5,7 @@ use std::{
 
 use log::{error, info, warn};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use tokio_util::sync::CancellationToken;
 
 use crate::{chat::EChatState, tui::app::{App, ETuiEvent}};
 
@@ -15,15 +16,16 @@ impl AppEvent {
     /// 监听键盘事件并将其发送到事件通道
     pub async fn watch_events(
         tx: mpsc::Sender<ETuiEvent>,
+        cancel: CancellationToken,
     ) -> io::Result<()> {
         loop {
+            if cancel.is_cancelled() {
+                break;
+            }
             match event::read() {
                 Ok(Event::Key(key)) => {
                     if let Err(e) = tx.send(ETuiEvent::KeyEvent(key)) {
                         error!("Failed to send event: {}", e);
-                    }
-                    if key.code == KeyCode::Esc {
-                        break;
                     }
                 }
                 Ok(_) => {} // 忽略非键盘事件
@@ -44,9 +46,9 @@ impl AppEvent {
             return;
         }
         // 拿出来避免死锁
-        let (is_running, token) = {
-            (app.chat.lock().unwrap().is_running(), app.chat.lock().unwrap().get_cancel_token())
-        };
+        let t = app.chat.lock().unwrap();
+        let is_running = t.is_running();
+        let token = t.get_cancel_token();
         if is_running {
             token.cancel();
         } else {
@@ -164,7 +166,7 @@ impl AppEvent {
             }
         }
         
-        let mut chat = app.chat.lock().unwrap();
+        let mut chat = {app.chat.lock().unwrap()};
         if !chat.is_running() {
             match chat.get_state() {
                 EChatState::WaitingToolConfirm => {

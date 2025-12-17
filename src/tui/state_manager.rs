@@ -28,7 +28,7 @@ impl StateManager {
         
         // 提取需要的信息，然后释放锁
         let (state, conversation_turn_info) = {
-            let ctx = app.chat.lock().unwrap();
+            let ctx = {app.chat.lock().unwrap()};
             let conversation_turn_info = ctx.get_conversation_turn_info();
             (ctx.get_state(), conversation_turn_info)
         };

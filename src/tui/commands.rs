@@ -207,7 +207,7 @@ impl TuiCommand for HistoryCommand {
     
     async fn execute(&self, app: &mut crate::tui::app::App, _args: &str) -> bool {
         let history = {
-            let chat = app.chat.lock().unwrap();
+            let chat = {app.chat.lock().unwrap()};
             chat.context().iter()
                 .filter(|msg| msg.role == "user" || msg.role == "assistant")
                 .map(|msg| format!("[{}] {}", msg.role, msg.content))

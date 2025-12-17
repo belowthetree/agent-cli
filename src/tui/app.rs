@@ -10,6 +10,7 @@ use log::info;
 use ratatui::{
     crossterm::event::KeyEvent, widgets::ScrollbarState, DefaultTerminal, Frame
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     Args, chat::Chat, mcp, model::param::ModelMessage, tui::{
@@ -119,9 +120,11 @@ impl App {
     /// 
     /// 循环持续运行直到用户退出（按ESC键）或发生错误。
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
+        let cancel = CancellationToken::new();
         let t = tokio::spawn(
         AppEvent::watch_events(
             self.event_tx.clone(),
+            cancel.clone(),
         ));
         terminal.draw(|frame| {
             self.render(frame);
@@ -139,6 +142,7 @@ impl App {
                 AppEvent::handle_events(&mut self, ev)?;
             }
         }
+        cancel.cancel();
         t.abort();
         Ok(())
     }

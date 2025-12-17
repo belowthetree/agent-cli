@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::{chat::StreamedChatResponse};
+
 /// 可以从远程客户端发送的输入类型。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum InputType {
@@ -173,6 +175,40 @@ pub struct TokenUsage {
 }
 
 impl RemoteResponse {
+    pub fn model_message(msg: StreamedChatResponse, request_id: String)->Result<Self, ()> {
+        match msg {
+            StreamedChatResponse::Text(text) => {
+                // 实时发送文本块给客户端（使用 Stream 响应）
+                Ok(RemoteResponse {
+                    request_id: request_id,
+                    response: ResponseContent::Stream(text),
+                    error: None,
+                    token_usage: None,
+                })
+            }
+            StreamedChatResponse::Reasoning(think) => {
+                let formatted = format!("[Reasoning: {}]", think);
+                Ok(RemoteResponse {
+                    request_id: request_id,
+                    response: ResponseContent::Stream(formatted),
+                    error: None,
+                    token_usage: None,
+                })
+            }
+            StreamedChatResponse::ToolCall(tool_call) => {
+                let formatted = format!("[Tool call: {}]", tool_call.function.name);
+                // 实时发送工具调用信息给客户端（使用 Stream 响应）
+                Ok(RemoteResponse {
+                    request_id: request_id,
+                    response: ResponseContent::Stream(formatted),
+                    error: None,
+                    token_usage: None,
+                })
+            }
+            _ => {Err(())}
+        }
+    }
+
     /// 创建一个错误响应。
     pub fn error(request_id: &str, error: &str) -> Self {
         Self {

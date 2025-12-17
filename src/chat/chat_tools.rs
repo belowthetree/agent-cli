@@ -53,6 +53,7 @@ impl ChatTools {
             futures::pin_mut!(stream);
             while let Some(res) = stream.next().await {
                 if cancel_token.is_cancelled() {
+                    info!("工具取消");
                     return;
                 }
                 yield res;

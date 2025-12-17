@@ -9,7 +9,7 @@ use super::chat_state::ChatState;
 use super::chat_tools::ChatTools;
 
 /// 流式聊天响应类型
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StreamedChatResponse {
     Text(String),
     ToolCall(ToolCall),
@@ -37,6 +37,7 @@ impl ChatStream {
                 while let Some(res) = stream.next().await {
                     // 检查是否已取消
                     if cancel_token.is_cancelled() {
+                        info!("流式取消");
                         break;
                     }
                     info!("{:?}", res);
@@ -74,6 +75,7 @@ impl ChatStream {
             yield Ok(StreamedChatResponse::End);
             chat.add_message(msg.clone());
             chat.state.set_state(crate::chat::EChatState::Idle);
+            info!("退出");
         }
     }
 
@@ -94,6 +96,7 @@ impl ChatStream {
                     while let Some(res) = stream.next().await {
                         // 检查是否已取消
                         if cancel_token.is_cancelled() {
+                            info!("非流式取消");
                             break;
                         }
                         info!("{:?}", res);
@@ -190,6 +193,7 @@ impl ChatStream {
                         }
                     }
                     if chat.state.get_cancel_token().is_cancelled() {
+                        info!("工具取消");
                         break;
                     }
                 }

@@ -76,7 +76,7 @@ pub async fn process_streaming_chat_with_ws(
                                             }
                                         } else {
                                             // 如果发送失败，记录错误但不立即返回
-                                            error!("生成消息错误 {:?}", msg);
+                                            info!("生成消息 {:?}", msg);
                                             break;
                                         }
                                     }

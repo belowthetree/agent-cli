@@ -199,6 +199,7 @@ impl Chat {
                         self.state.set_state(EChatState::Idle);
                         break;
                     }
+                    info!("有工具需要调用");
                 } else {
                     warn!("正在运行");
                     yield Err(anyhow::anyhow!("对话不在空闲状态，当前状态：{:?}", self.get_state()));

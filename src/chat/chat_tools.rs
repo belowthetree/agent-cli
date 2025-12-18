@@ -36,6 +36,7 @@ impl ChatTools {
                 for response in tool_responses {
                     chat.state.add_message(response);
                 }
+                yield Ok(StreamedChatResponse::End);
             }
         }
     }

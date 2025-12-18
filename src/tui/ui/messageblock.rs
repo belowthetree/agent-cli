@@ -111,7 +111,6 @@ impl MessageBlock {
 
     pub fn get_bottom_content(&self)->String {
         // 添加token使用信息显示
-        info!("token {:?}", self.message.token_usage);
         if let Some(usage) = &self.message.token_usage {
             return format!(
                 "\n\nToken使用: 本次回复消耗 {} tokens (prompt: {}, completion: {}), 总计: {} tokens",

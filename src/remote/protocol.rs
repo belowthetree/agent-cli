@@ -45,6 +45,13 @@ pub enum InputType {
         approved: bool,
         reason: Option<String>,
     },
+    /// 对话轮次确认响应
+    TurnConfirmationResponse {
+        /// 是否确认重置对话轮次
+        confirmed: bool,
+        /// 可选的确认原因
+        reason: Option<String>,
+    },
 }
 
 impl InputType {
@@ -73,6 +80,10 @@ impl InputType {
             InputType::ToolConfirmationResponse { name, arguments, approved, reason } => {
                 format!("[ToolConfirmationResponse: {} with args: {}, approved: {}, reason: {}]", 
                     name, arguments, approved, reason.as_deref().unwrap_or("none"))
+            },
+            InputType::TurnConfirmationResponse { confirmed, reason } => {
+                format!("[TurnConfirmationResponse: confirmed: {}, reason: {}]", 
+                    confirmed, reason.as_deref().unwrap_or("none"))
             },
         }
     }
@@ -155,6 +166,15 @@ pub enum ResponseContent {
         name: String,
         arguments: serde_json::Value,
         approved: bool,
+        reason: Option<String>,
+    },
+    /// 对话轮次确认请求
+    TurnConfirmationRequest {
+        /// 当前对话轮次
+        current_turns: usize,
+        /// 最大对话轮次
+        max_turns: usize,
+        /// 可选的请求原因
         reason: Option<String>,
     },
     /// 流式响应完成标记

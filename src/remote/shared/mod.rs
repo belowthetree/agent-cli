@@ -77,7 +77,6 @@ pub async fn process_streaming_chat_with_ws(
                                         } else {
                                             // 如果发送失败，记录错误但不立即返回
                                             info!("生成消息 {:?}", msg);
-                                            break;
                                         }
                                     }
                                 }
@@ -212,6 +211,24 @@ pub async fn process_streaming_chat_with_ws(
                 }
             }
         }
+    }
+    
+    // 发送对话轮次确认协议
+    if chat.get_state() == EChatState::WaitingTurnConfirm {
+        let (current_turns, max_turns) = chat.get_conversation_turn_info();
+        info!("发送对话轮次确认请求: 当前轮次={}, 最大轮次={}", current_turns, max_turns);
+        
+        // Return a turn confirmation request
+        return Ok(RemoteResponse {
+            request_id: String::new(), // Will be replaced by caller
+            response: ResponseContent::TurnConfirmationRequest {
+                current_turns,
+                max_turns,
+                reason: Some(format!("已达到最大对话轮次限制 ({} 轮)。是否重置对话轮次以继续对话？", max_turns)),
+            },
+            error: None,
+            token_usage: None,
+        });
     }
     
     // token 使用情况

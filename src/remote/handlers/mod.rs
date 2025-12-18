@@ -8,6 +8,7 @@ mod interrupt_handler;
 mod regenerate_handler;
 mod clear_context_handler;
 mod tool_confirmation_handler;
+mod turn_confirmation_handler;
 
 pub use base_handler::RequestHandler;
 pub use chat_handler::ChatHandler;
@@ -17,6 +18,7 @@ pub use interrupt_handler::InterruptHandler;
 pub use regenerate_handler::RegenerateHandler;
 pub use clear_context_handler::ClearContextHandler;
 pub use tool_confirmation_handler::ToolConfirmationHandler;
+pub use turn_confirmation_handler::TurnConfirmationHandler;
 
 use crate::remote::protocol::RemoteRequest;
 
@@ -36,6 +38,8 @@ impl HandlerFactory {
             InputType::ClearContext => Some(Box::new(ClearContextHandler)),
             InputType::ToolConfirmationResponse { name: _, arguments: _, approved: _, reason: _ } => 
                 Some(Box::new(ToolConfirmationHandler)),
+            InputType::TurnConfirmationResponse { confirmed: _, reason: _ } => 
+                Some(Box::new(TurnConfirmationHandler)),
             _ => None, // 普通聊天请求由 ChatHandler 处理
         }
     }

@@ -665,6 +665,154 @@ main();
 - 错误消息: 描述性错误信息
 - 详细信息: 包含工具名称、具体错误信息和工具参数
 
+## 对话轮次确认协议
+
+### 对话轮次确认请求
+
+当对话轮次达到最大限制时，服务器会向客户端发送对话轮次确认请求。客户端需要响应此请求以确认是否重置对话轮次并继续对话。
+
+#### 对话轮次确认请求格式
+
+```json
+{
+  "request_id": "string",
+  "response": {
+    "TurnConfirmationRequest": {
+      "current_turns": 10,
+      "max_turns": 10,
+      "reason": "已达到最大对话轮次限制 (10 轮)。是否重置对话轮次以继续对话？"
+    }
+  },
+  "error": null,
+  "token_usage": null
+}
+```
+
+**参数说明:**
+- `current_turns`: 当前对话轮次
+- `max_turns`: 最大对话轮次限制
+- `reason`: 可选字符串，提供请求确认的原因
+
+### 对话轮次确认响应
+
+客户端需要发送对话轮次确认响应来批准或拒绝重置对话轮次。
+
+#### 对话轮次确认响应格式
+
+**请求格式:**
+```json
+{
+  "request_id": "string",
+  "input": {
+    "TurnConfirmationResponse": {
+      "confirmed": true,
+      "reason": "可选原因说明"
+    }
+  },
+  "": false,
+  "use_tools": true
+}
+```
+
+**参数说明:**
+- `confirmed`: 布尔值，true表示确认重置对话轮次，false表示拒绝重置
+- `reason`: 可选字符串，提供确认或拒绝的原因
+
+### 处理流程
+
+1. **触发条件**: 当对话轮次达到配置的最大限制时，服务器会暂停当前对话处理，进入等待确认状态（`EChatState::WaitingTurnConfirm`）
+
+2. **请求发送**: 服务器向客户端发送 `TurnConfirmationRequest` 响应
+
+3. **客户端响应**: 客户端需要发送 `TurnConfirmationResponse` 输入来响应：
+   - 如果 `confirmed: true`: 服务器将重置对话轮次，调用 `Chat::reset_conversation_turn()` 和 `Chat::confirm()`，然后继续处理对话
+   - 如果 `confirmed: false`: 服务器将保持当前状态，对话不会继续
+
+4. **继续对话**: 当用户确认重置后，服务器会使用 `stream_rechat()` 继续处理已添加到上下文中的对话，确保对话连续性
+
+### 使用示例
+
+#### 示例 1: 对话轮次确认流程
+
+**服务器请求 (当达到最大轮次时):**
+```json
+{
+  "request_id": "chat_123",
+  "response": {
+    "TurnConfirmationRequest": {
+      "current_turns": 10,
+      "max_turns": 10,
+      "reason": "已达到最大对话轮次限制 (10 轮)。是否重置对话轮次以继续对话？"
+    }
+  },
+  "error": null,
+  "token_usage": null
+}
+```
+
+**客户端确认响应:**
+```json
+{
+  "request_id": "confirm_456",
+  "input": {
+    "TurnConfirmationResponse": {
+      "confirmed": true,
+      "reason": "继续对话"
+    }
+  },
+  "": false,
+  "use_tools": true
+}
+```
+
+**服务器继续对话:**
+```json
+{
+  "request_id": "chat_123",
+  "response": {
+    "Stream": "继续对话的文本..."
+  },
+  "error": null,
+  "token_usage": null
+}
+```
+
+#### 示例 2: 客户端拒绝重置
+
+**客户端拒绝响应:**
+```json
+{
+  "request_id": "confirm_456",
+  "input": {
+    "TurnConfirmationResponse": {
+      "confirmed": false,
+      "reason": "结束当前对话"
+    }
+  },
+  "": false,
+  "use_tools": true
+}
+```
+
+**服务器响应:**
+```json
+{
+  "request_id": "chat_123",
+  "response": {
+    "Text": "对话已结束，未重置轮次。"
+  },
+  "error": null,
+  "token_usage": null
+}
+```
+
+### 注意事项
+
+1. **状态管理**: 在等待确认期间，聊天状态为 `WaitingTurnConfirm`，不会处理其他输入
+2. **请求ID匹配**: 客户端应使用与原始请求匹配的 `request_id` 来关联确认响应
+3. **超时处理**: 客户端应实现超时机制，如果长时间未收到确认响应，服务器可能会超时
+4. **对话连续性**: 确认重置后，服务器会继续处理之前的对话上下文，确保对话的连贯性
+
 ## 版本历史
 
 - v1.0.0 (初始版本): 支持基本文本对话和工具调用
@@ -674,6 +822,7 @@ main();
 - v1.4.0: 添加获取内置指令列表功能（GetCommands），允许远端客户端查询TUI斜杠命令
 - v1.5.0: 添加工具确认协议和增强的错误信息传递
 - v1.6.0: 添加流式响应完成标记（Complete），使客户端能够明确知道流式响应何时结束
+- v1.7.0: 添加对话轮次确认协议，支持对话轮次重置确认
 
 ## 支持与反馈
 

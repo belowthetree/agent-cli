@@ -102,7 +102,6 @@ impl ChatClient {
         stream! {
             info!("stream chat 开始，参数: {:?}", param);
             let mut stream_res = Box::pin(agent.stream_chat(param).await);
-            let mut token_usage: Option<TokenUsage> = None;
             
             while let Some(res) = stream_res.next().await {
                 match res {
@@ -117,18 +116,10 @@ impl ChatClient {
                     }
                     Ok(CommonConnectionContent::FinishReason(reason)) => {
                         info!("流式聊天完成，原因: {}", reason);
-                        // 在流式结束时，如果有token使用信息，发送一条包含token使用信息的消息
-                        if let Some(usage) = token_usage {
-                            let mut msg = ModelMessage::assistant("", "", vec![]);
-                            msg.token_usage = Some(usage);
-                            yield Ok(msg);
-                        }
-                        break;
                     }
                     Ok(CommonConnectionContent::TokenUsage(usage)) => {
                         info!("Token 使用情况: prompt_tokens={}, completion_tokens={}, total_tokens={}", 
                             usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
-                        token_usage = Some(usage.clone());
                         yield Ok(ModelMessage::token(usage));
                     }
                     Err(e) => {

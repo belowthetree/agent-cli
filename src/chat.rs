@@ -157,6 +157,7 @@ impl Chat {
         async_stream::stream! {
             loop {
                 // 先判断是否超过轮次
+                info!("对话轮次 {} {}", self.state.get_conversation_turn_info(), self.max_context_num);
                 if self.is_over_context_limit() {
                     info!("超过对话轮次 {} {}", self.state.get_conversation_turn_info(), self.max_context_num);
                     self.state.set_state(EChatState::WaitingTurnConfirm);

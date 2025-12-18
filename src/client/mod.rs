@@ -18,7 +18,7 @@ pub async fn handle_output(stream: impl Stream<Item = Result<StreamedChatRespons
                     StreamedChatResponse::ToolCall(tool_call) => print!("{:?}", tool_call),
                     StreamedChatResponse::Reasoning(think) => print!("{}", think),
                     StreamedChatResponse::ToolResponse(tool) => print!("{:?}", tool),
-                    StreamedChatResponse::End => {}
+                    _ => {}
                 }
                 // 改进错误处理：使用?操作符而不是unwrap()
                 io::stdout().flush()?;
@@ -53,7 +53,7 @@ fn handle_response_item(res: StreamedChatResponse, output: &mut String) {
             print!("{}", formatted);
             output.push_str(&formatted);
         }
-        StreamedChatResponse::End => {},
+        _ => {},
     }
 }
 

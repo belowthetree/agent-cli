@@ -239,11 +239,11 @@ impl AppEvent {
 
     /// 处理所有事件
     pub fn handle_events(app: &mut App, event: ETuiEvent) -> io::Result<()> {
+        if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
+            error!("{:?}", e);
+        }
         match event {
             ETuiEvent::KeyEvent(key) => {
-                if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
-                    error!("{:?}", e);
-                }
                 info!("输入 {:?}", key);
                 if key.kind == KeyEventKind::Press {
                     match key.code {
@@ -274,6 +274,7 @@ impl AppEvent {
                             app.messages[idx].add_tool(tool);
                         }
                     }
+                    app.messages[idx].token_usage = msg.token_usage;
                 } else if app.messages.len() == idx {
                     app.messages.push(msg);
                 } else {
@@ -282,9 +283,6 @@ impl AppEvent {
             }
             ETuiEvent::ScrollToBottom => {
                 // 处理滚动到底部事件
-                if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
-                    error!("{:?}", e);
-                }
                 if app.max_line > app.window_height {
                     app.index = app.max_line - app.window_height;
                 }

@@ -91,27 +91,24 @@ impl SseConnection {
                         if let Some(finish_reason) = choice.get("finish_reason") {
                             if finish_reason.as_str() == Some("stop") {
                                 yield Ok(CommonConnectionContent::FinishReason("stop".to_string()));
-                                for tool in tool_calls {
-                                    yield Ok(CommonConnectionContent::ToolCall(tool));
+                                for tool in tool_calls.iter() {
+                                    yield Ok(CommonConnectionContent::ToolCall(tool.clone()));
                                 }
-                                return;
+                                break;
                             }
                         }
-                        let mut ret: Option<Value> = None;
+                        let message;
                         if let Some(t) = choice.get("message") {
-                            ret = Some(t.clone());
+                            message = t.clone();
                         } else if let Some(t) = choice.get("delta") {
-                            ret = Some(t.clone());
+                            message = t.clone();
                         } else {
                             warn!("未知格式 {:?}", choice);
-                        }
-                        if ret.is_none() {
                             for tool in tool_calls {
                                 yield Ok(CommonConnectionContent::ToolCall(tool));
                             }
                             return;
                         }
-                        let message = ret.unwrap();
                         // 处理对话内容
                         if let Some(ctx) = message.get("content") {
                             if let Some(text_str) = ctx.as_str() {

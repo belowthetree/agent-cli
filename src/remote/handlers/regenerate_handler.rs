@@ -52,6 +52,9 @@ impl RequestHandler for RegenerateHandler {
                                         response_chunks.push(format!("[Tool result: {}]", tool_response.content));
                                     }
                                 }
+                                StreamedChatResponse::TokenUsage(usage) => {
+                                    response_chunks.push(format!("{:?}", usage));
+                                }
                                 StreamedChatResponse::End => {
                                     // End marker, do nothing here
                                 }

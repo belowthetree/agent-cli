@@ -101,6 +101,11 @@ impl AppChat {
                                 error!("{:?}", e);
                             }
                         }
+                        StreamedChatResponse::TokenUsage(usage) => {
+                            if let Err(e) = tx.send(ETuiEvent::UpdateMessage(idx, ModelMessage::token(usage))) {
+                                error!("{:?}", e);
+                            }
+                        }
                         StreamedChatResponse::End => {
                             idx += 1;
                         }

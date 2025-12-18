@@ -3,6 +3,7 @@ use futures::{pin_mut, Stream, StreamExt};
 use log::info;
 
 use crate::chat::Chat;
+use crate::connection::TokenUsage;
 use crate::model::param::{ModelMessage, ToolCall};
 
 use super::chat_state::ChatState;
@@ -15,6 +16,7 @@ pub enum StreamedChatResponse {
     ToolCall(ToolCall),
     Reasoning(String),
     ToolResponse(ModelMessage),
+    TokenUsage(TokenUsage),
     End,
 }
 
@@ -42,7 +44,7 @@ impl ChatStream {
                     }
                     info!("{:?}", res);
                     match res {
-                        Ok(mut res) => {
+                        Ok(res) => {
                             if !res.content.is_empty() {
                                 msg.add_content(res.content.clone());
                                 yield Ok(StreamedChatResponse::Text(res.content.to_string()));
@@ -58,14 +60,8 @@ impl ChatStream {
                                 }
                             }
                             // 保存token使用情况
-                            if let Some(usage) = &res.token_usage {
-                                // 先检查token限制（借用）
-                                if chat.state.check_token_limit(Some(usage)) {
-                                    // 超过限制，停止生成
-                                    break;
-                                }
-                                // 然后移动值
-                                msg.token_usage = res.token_usage.take();
+                            if let Some(usage) = res.token_usage {
+                                yield Ok(StreamedChatResponse::TokenUsage(usage));
                             }
                         },
                         Err(e) => yield Err(anyhow::anyhow!(e.to_string())),

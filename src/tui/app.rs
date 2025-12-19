@@ -199,6 +199,9 @@ impl App {
         if let Err(e) = self.event_tx.send(ETuiEvent::AddMessage(model_message)) {
             log::error!("Failed to send info message event: {}", e);
         }
+        if let Err(e) = self.event_tx.send(ETuiEvent::ScrollToBottom) {
+            log::error!("Failed to send scroll to bottom {:?}", e);
+        }
     }
     
     /// 添加信息消息
@@ -211,6 +214,9 @@ impl App {
         // 通过事件通道发送信息消息
         if let Err(e) = self.event_tx.send(ETuiEvent::AddMessage(model_message)) {
             log::error!("Failed to send info message event: {}", e);
+        }
+        if let Err(e) = self.event_tx.send(ETuiEvent::ScrollToBottom) {
+            log::error!("Failed to send scroll to bottom {:?}", e);
         }
     }
     

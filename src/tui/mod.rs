@@ -9,9 +9,11 @@ mod renderer;
 mod state_manager;
 mod commands;
 mod ui;
+mod perf_monitor;
 
 #[allow(unused_imports)]
 pub use commands::{TuiCommand, CommandRegistry, init_global_registry, global_registry};
+pub use perf_monitor::PerfMonitor;
 use log::error;
 
 pub async fn run() {

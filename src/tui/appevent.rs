@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use tokio_util::sync::CancellationToken;
 
-use crate::{chat::EChatState, tui::app::{App, ETuiEvent}};
+use crate::{chat::EChatState, tui::app::{App, ETuiEvent}, perf_start, perf_end};
 
 /// 事件处理器，负责处理键盘事件和事件监听
 pub struct AppEvent;
@@ -117,6 +117,8 @@ impl AppEvent {
 
     /// 处理回车键：发送消息给模型或执行命令
     pub fn handle_enter_key(app: &mut App) {
+        let monitor = perf_start!("handle_enter_key", 50);
+        
         // 首先检查是否显示选项对话框
         if app.option_dialog.visible {
             // 先获取需要的数据，避免同时借用
@@ -139,6 +141,7 @@ impl AppEvent {
                 // 这里可以添加回调机制来处理选项选择
                 // 例如：app.handle_option_selection(&title, selected_index, &selected_option);
             }
+            perf_end!(monitor);
             return;
         }
         
@@ -162,6 +165,7 @@ impl AppEvent {
                         app.execute_command(&command).await;
                     });
                 });
+                perf_end!(monitor);
                 return;
             }
         }
@@ -226,6 +230,8 @@ impl AppEvent {
             app.cursor_offset = 0;
             app.input.clear();
         }
+        
+        perf_end!(monitor);
     }
 
     /// 处理字符键：输入文本
@@ -239,11 +245,13 @@ impl AppEvent {
 
     /// 处理所有事件
     pub fn handle_events(app: &mut App, event: ETuiEvent) -> io::Result<()> {
-        if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
-            error!("{:?}", e);
-        }
+        let monitor = perf_start!("handle_events", 20);
+        
         match event {
             ETuiEvent::KeyEvent(key) => {
+                if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
+                    error!("{:?}", e);
+                }
                 info!("输入 {:?}", key);
                 if key.kind == KeyEventKind::Press {
                     match key.code {
@@ -259,12 +267,18 @@ impl AppEvent {
                 }
             }
             ETuiEvent::AddMessage(model_message) => {
+                if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
+                    error!("{:?}", e);
+                }
                 info!("AddMessage {:?}", model_message);
                 // 处理信息消息
                 app.messages.push(model_message);
                 app.refresh();
             }
             ETuiEvent::UpdateMessage(idx, msg) => {
+                if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
+                    error!("{:?}", e);
+                }
                 info!("UpdateMessage {} {:?}", idx, msg);
                 if app.messages.len() > idx {
                     app.messages[idx].add_content(msg.content);
@@ -289,6 +303,8 @@ impl AppEvent {
             }
             _ => {} // 忽略其他事件类型
         }
+        
+        perf_end!(monitor);
         Ok(())
     }
 }

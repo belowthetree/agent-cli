@@ -124,6 +124,28 @@ impl FileSystemTool {
             .map_err(|e| anyhow!("写入文件失败: {}", e))
     }
 
+    /// 修改文件内容（替换部分内容）
+    fn modify_file(&self, path: &Path, search: &str, replacement: &str) -> Result<()> {
+        if Self::needs_confirmation(path) {
+            return Err(anyhow!("路径 '{}' 不在当前工作目录下，需要用户手动同意", path.display()));
+        }
+
+        // 读取文件内容
+        let content = fs::read_to_string(path)
+            .map_err(|e| anyhow!("读取文件失败: {}", e))?;
+        
+        // 替换内容
+        if !content.contains(search) {
+            return Err(anyhow!("在文件中未找到搜索内容: '{}'", search));
+        }
+        
+        let new_content = content.replace(search, replacement);
+        
+        // 写入文件
+        fs::write(path, new_content)
+            .map_err(|e| anyhow!("写入文件失败: {}", e))
+    }
+
     /// 列出目录内容
     fn list_directory(&self, path: &Path) -> Result<Vec<String>> {
         if Self::needs_confirmation(path) {
@@ -258,8 +280,38 @@ impl InternalTool for FileSystemTool {
                 })
             }
             
+            "modify" => {
+                let search = args.get("search")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("修改操作缺少 'search' 参数"))?;
+                
+                let replacement = args.get("replacement")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("修改操作缺少 'replacement' 参数"))?;
+                
+                self.modify_file(path, search, replacement)?;
+                let result = serde_json::json!({
+                    "success": true,
+                    "message": format!("文件 '{}' 修改成功", path_str),
+                    "path": path_str,
+                    "search": search,
+                    "replacement": replacement
+                });
+                
+                Ok(CallToolResult {
+                    content: vec![Annotated::new(
+                        RawContent::Text(RawTextContent {
+                            text: result.to_string(),
+                        }),
+                        None,
+                    )],
+                    structured_content: None,
+                    is_error: None,
+                })
+            }
+            
             _ => {
-                Err(anyhow!("不支持的操作类型: '{}'。支持的操作: read, write, list, check", operation))
+                Err(anyhow!("不支持的操作类型: '{}'。支持的操作: read, write, list, check, modify", operation))
             }
         }
     }
@@ -275,8 +327,8 @@ impl InternalTool for FileSystemTool {
     "properties": {
         "operation": {
             "type": "string",
-            "description": "操作类型: 'read' (读取文件), 'write' (写入文件), 'list' (列出目录), 'check' (检查路径权限)",
-            "enum": ["read", "write", "list", "check"]
+            "description": "操作类型: 'read' (读取文件), 'write' (写入文件), 'list' (列出目录), 'check' (检查路径权限), 'modify' (修改文件内容)",
+            "enum": ["read", "write", "list", "check", "modify"]
         },
         "path": {
             "type": "string",
@@ -285,6 +337,14 @@ impl InternalTool for FileSystemTool {
         "content": {
             "type": "string",
             "description": "写入文件时的内容（仅用于 write 操作）"
+        },
+        "search": {
+            "type": "string",
+            "description": "要搜索的内容（仅用于 modify 操作）"
+        },
+        "replacement": {
+            "type": "string",
+            "description": "替换的内容（仅用于 modify 操作）"
         }
     },
     "required": ["operation", "path"]
@@ -329,6 +389,14 @@ impl InternalTool for FileSystemTool {
         "current_directory": {
             "type": "string",
             "description": "当前工作目录（仅用于 check 操作）"
+        },
+        "search": {
+            "type": "string",
+            "description": "搜索的内容（仅用于 modify 操作）"
+        },
+        "replacement": {
+            "type": "string",
+            "description": "替换的内容（仅用于 modify 操作）"
         }
     },
     "required": ["success"]

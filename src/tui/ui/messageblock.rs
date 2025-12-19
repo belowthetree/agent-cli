@@ -1,5 +1,6 @@
 use log::debug;
 use ratatui::{buffer::Buffer, layout::Rect, style::{Style, Stylize}, text::{Line}, widgets::{Block, Borders, ListItem, Padding, Paragraph, Widget, Wrap}};
+use serde_json::{Value, Map};
 
 use crate::{model::param::ModelMessage, tui::get_char_width};
 
@@ -260,15 +261,55 @@ impl MessageBlock {
     pub fn get_content(&self)->String {
         let mut content = self.message.content.clone().into_owned();
         if let Some(tools) = &self.message.tool_calls {
-            let mut ct = String::new();
-            for tool in tools {
-                ct += &tool.function.name;
+            if !tools.is_empty() {
+                content += "\n工具调用：";
+                for tool in tools {
+                    let tool_name = &tool.function.name;
+                    let tool_args = &tool.function.arguments;
+                    
+                    // 解析工具参数
+                    let tool_info = Self::parse_tool_info(tool_name, tool_args);
+                    content += &format!("\n  - {}", tool_info);
+                }
             }
-            content += "\n工具调用：";
-            content += &ct;
         }
         
         content
+    }
+    
+    /// 解析工具信息，特别是filesystem工具的参数
+    fn parse_tool_info(tool_name: &str, arguments: &str) -> String {
+        if tool_name == "filesystem" {
+            // 尝试解析JSON参数
+            match serde_json::from_str::<Map<String, Value>>(arguments) {
+                Ok(params) => {
+                    let operation = params.get("operation")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    
+                    let path = params.get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    
+                    // 根据操作类型显示不同的信息
+                    match operation {
+                        "read" => format!("使用工具filesystem读取文件 {}", path),
+                        "write" => format!("使用工具filesystem写入文件 {}", path),
+                        "list" => format!("使用工具filesystem列出目录 {}", path),
+                        "check" => format!("使用工具filesystem检查路径权限 {}", path),
+                        "modify" => format!("使用工具filesystem修改文件 {}", path),
+                        _ => format!("使用工具filesystem执行{}操作 {}", operation, path),
+                    }
+                }
+                Err(_) => {
+                    // 如果JSON解析失败，显示原始信息
+                    format!("使用工具filesystem (参数解析失败)")
+                }
+            }
+        } else {
+            // 其他工具显示简单信息
+            format!("使用工具{}", tool_name)
+        }
     }
 
     pub fn get_bottom_content(&self)->String {

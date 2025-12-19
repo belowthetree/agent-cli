@@ -39,3 +39,4 @@ onebot_v11 = {version = "0.1.5", optional = true}
 chrono = "0.4.38"
 tokio-tungstenite = "0.21"
 tungstenite = "0.21"
+eventsource-client = "0.16.0"

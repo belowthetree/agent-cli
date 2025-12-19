@@ -1,9 +1,9 @@
-use futures::{Stream};
-use async_stream::stream;
+use futures::Stream;
 use log::{error, info, warn};
 use reqwest::header;
 use serde_json::Value;
 use std::sync::OnceLock;
+use eventsource_client::{Client, ClientBuilder, SSE};
 use tokio_stream::StreamExt;
 
 use crate::{connection::{CommonConnectionContent, TokenUsage}, model::param::ToolCall};
@@ -24,131 +24,168 @@ fn get_http_client() -> &'static reqwest::Client {
 pub struct SseConnection;
 
 impl SseConnection {
-    pub fn stream(url: String, key: String, body: String)->impl Stream<Item = Result<CommonConnectionContent, anyhow::Error>> {
-        stream! {
-            let client = get_http_client();
-            let response = client.post(url.clone())
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("Authorization", key.clone())
-                .body(body.clone())
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("{:?}", e.to_string()))?;
-            if !response.status().is_success() {
-                error!("{:?}", response);
-                let ret = response.text().await.unwrap();
-                error!("{:?} {:?} {} {}", ret, body, url, key);
-                yield Err(anyhow::anyhow!(ret));
-                return;
-            }
-            info!("开始流式处理");
-            // 开始循环解析 sse 流式传输
-            let mut stream = response.bytes_stream();
+    pub fn stream(url: String, key: String, body: String) -> impl Stream<Item = std::result::Result<CommonConnectionContent, anyhow::Error>> {
+        let _client = get_http_client();
+        let url_clone = url.clone();
+        let key_clone = key.clone();
+        let body_clone = body.clone();
+        
+        async_stream::stream! {
+            // 使用 eventsource_client 解析 SSE 流
             let mut tool_calls = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                let chunk = match chunk {
-                    Ok(chunk) => chunk,
+            
+            info!("开始流式处理");
+            
+            // 创建 eventsource 客户端构建器
+            let client_builder = match ClientBuilder::for_url(&url_clone) {
+                Ok(builder) => builder,
+                Err(e) => {
+                    yield Err(anyhow::anyhow!("创建 SSE 客户端构建器失败: {:?}", e));
+                    return;
+                }
+            };
+            
+            // 配置客户端 - 第一个 header
+            let client_builder = match client_builder.header("Content-Type", "application/json") {
+                Ok(builder) => builder,
+                Err(e) => {
+                    yield Err(anyhow::anyhow!("添加 Content-Type 请求头失败: {:?}", e));
+                    return;
+                }
+            };
+            
+            // 配置客户端 - 第二个 header
+            let client_builder = match client_builder.header("Authorization", &key_clone) {
+                Ok(builder) => builder,
+                Err(e) => {
+                    yield Err(anyhow::anyhow!("添加 Authorization 请求头失败: {:?}", e));
+                    return;
+                }
+            };
+            
+            // 设置 HTTP 方法为 POST
+            let client_builder = client_builder.method("POST".to_string());
+            
+            // 构建客户端
+            let client = client_builder.body(body_clone.clone()).build();
+            
+            let mut stream = client.stream();
+            
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(SSE::Event(evt)) => {
+                        if evt.event_type == "message" || evt.event_type.is_empty() {
+                            let data = evt.data;
+                            
+                            // 处理结束标志
+                            if data == "[DONE]" {
+                                for tool in tool_calls {
+                                    yield Ok(CommonConnectionContent::ToolCall(tool));
+                                }
+                                return;
+                            }
+                            
+                            let json = match serde_json::from_str::<Value>(&data) {
+                                Ok(json) => json,
+                                Err(e) => {
+                                    error!("JSON 解析错误: {:?}, 数据: {}", e, data);
+                                    continue;
+                                }
+                            };
+                            
+                            // 检查是否有 usage 字段（流式响应中通常只在最后发送）
+                            if let Some(usage) = json.get("usage") {
+                                if let Ok(token_usage) = serde_json::from_value::<TokenUsage>(usage.clone()) {
+                                    yield Ok(CommonConnectionContent::TokenUsage(token_usage));
+                                }
+                            }
+                            
+                            // 获取内容
+                            let choices = json.get("choices");
+                            if choices.is_none() {
+                                continue;
+                            }
+                            let choices = choices.unwrap();
+                            for choice in choices.as_array().unwrap_or(&vec![]) {
+                                if let Some(finish_reason) = choice.get("finish_reason") {
+                                    if finish_reason.as_str() == Some("stop") {
+                                        yield Ok(CommonConnectionContent::FinishReason("stop".to_string()));
+                                        for tool in tool_calls.iter() {
+                                            yield Ok(CommonConnectionContent::ToolCall(tool.clone()));
+                                        }
+                                        break;
+                                    }
+                                }
+                                
+                                let message;
+                                if let Some(t) = choice.get("message") {
+                                    message = t.clone();
+                                } else if let Some(t) = choice.get("delta") {
+                                    message = t.clone();
+                                } else {
+                                    warn!("未知格式 {:?}", choice);
+                                    for tool in tool_calls {
+                                        yield Ok(CommonConnectionContent::ToolCall(tool));
+                                    }
+                                    return;
+                                }
+                                
+                                // 处理对话内容
+                                if let Some(ctx) = message.get("content") {
+                                    if let Some(text_str) = ctx.as_str() {
+                                        yield Ok(CommonConnectionContent::Content(text_str.to_string()));
+                                    }
+                                }
+                                
+                                // 处理思考
+                                if let Some(ctx) = message.get("reasoning_content") {
+                                    if let Some(text_str) = ctx.as_str() {
+                                        yield Ok(CommonConnectionContent::Reasoning(text_str.to_string()));
+                                    }
+                                }
+                                
+                                // 处理工具调用，由于是字段增量的形式接受，等完全接收后再返回
+                                if let Some(ctx) = message.get("tool_calls") {
+                                    if let Some(arr) = ctx.as_array() {
+                                        for i in 0..arr.len() {
+                                            let tool: ToolCall = match serde_json::from_value(arr[i].clone()) {
+                                                Ok(tool) => tool,
+                                                Err(e) => {
+                                                    error!("工具调用解析错误: {:?}", e);
+                                                    continue;
+                                                }
+                                            };
+                                                
+                                            if tool_calls.len() <= tool.index {
+                                                tool_calls.insert(tool.index, tool);
+                                                continue;
+                                            }
+                                            
+                                            let t = tool_calls.get_mut(tool.index).unwrap();
+                                            t.id += &tool.id;
+                                            t.r#type += &tool.r#type;
+                                            t.function.name += &tool.function.name;
+                                            t.function.arguments += &tool.function.arguments;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ok(SSE::Connected(_)) => {
+                        // 连接已打开，可以忽略
+                    }
+                    Ok(SSE::Comment(_)) => {
+                        // 注释事件，可以忽略
+                    }
                     Err(e) => {
-                        error!("错误 {:?}", e);
+                        error!("SSE 错误: {:?}", e);
                         yield Err(anyhow::anyhow!(e.to_string()));
                         continue;
                     }
-                };
-                let chunk_str = String::from_utf8_lossy(&chunk);
-
-                // 解析SSE格式的数据
-                for line in chunk_str.lines() {
-                    if !line.starts_with("data:") {
-                        continue;
-                    }
-                    let data = line.trim_start_matches("data:").trim();
-                    // 处理结束标志
-                    if data == "[DONE]" {
-                        for tool in tool_calls {
-                            yield Ok(CommonConnectionContent::ToolCall(tool));
-                        }
-                        return;
-                    }
-                    
-                    let json = serde_json::from_str::<Value>(data);
-                    if json.is_err() {
-                        error!("错误 {:?}", json);
-                        continue;
-                    }
-                    let json = json.unwrap();
-                    
-                    // 检查是否有 usage 字段（流式响应中通常只在最后发送）
-                    if let Some(usage) = json.get("usage") {
-                        if let Ok(token_usage) = serde_json::from_value::<TokenUsage>(usage.clone()) {
-                            yield Ok(CommonConnectionContent::TokenUsage(token_usage));
-                        }
-                    }
-                    // 获取内容
-                    let choices = json.get("choices");
-                    if choices.is_none() {
-                        continue;
-                    }
-                    let choices = choices.unwrap();
-                    for choice in choices.as_array().unwrap_or(&vec![]) {
-                        if let Some(finish_reason) = choice.get("finish_reason") {
-                            if finish_reason.as_str() == Some("stop") {
-                                yield Ok(CommonConnectionContent::FinishReason("stop".to_string()));
-                                for tool in tool_calls.iter() {
-                                    yield Ok(CommonConnectionContent::ToolCall(tool.clone()));
-                                }
-                                break;
-                            }
-                        }
-                        let message;
-                        if let Some(t) = choice.get("message") {
-                            message = t.clone();
-                        } else if let Some(t) = choice.get("delta") {
-                            message = t.clone();
-                        } else {
-                            warn!("未知格式 {:?}", choice);
-                            for tool in tool_calls {
-                                yield Ok(CommonConnectionContent::ToolCall(tool));
-                            }
-                            return;
-                        }
-                        // 处理对话内容
-                        if let Some(ctx) = message.get("content") {
-                            if let Some(text_str) = ctx.as_str() {
-                                yield Ok(CommonConnectionContent::Content(text_str.to_string()));
-                            }
-                        }
-                        // 处理思考
-                        if let Some(ctx) = message.get("reasoning_content") {
-                            if let Some(text_str) = ctx.as_str() {
-                                yield Ok(CommonConnectionContent::Reasoning(text_str.to_string()));
-                            }
-                        }
-                        // 处理工具调用，由于是字段增量的形式接受，等完全接收后再返回
-                        if let Some(ctx) = message.get("tool_calls") {
-                            if let Some(arr) = ctx.as_array() {
-                                for i in 0..arr.len() {
-                                    let tool: ToolCall =
-                                        serde_json::from_value(arr[i].clone())
-                                            .map_err(|e| {
-                                                error!("错误 {:?}", json);
-                                                anyhow::anyhow!(e)
-                                        })?;
-                                    if tool_calls.len() <= tool.index {
-                                        tool_calls.insert(tool.index, tool);
-                                        continue;
-                                    }
-                                    let t = tool_calls.get_mut(tool.index).unwrap();
-                                    t.id += &tool.id;
-                                    t.r#type += &tool.r#type;
-                                    t.function.name += &tool.function.name;
-                                    t.function.arguments +=
-                                        &tool.function.arguments;
-                                }
-                            }
-                        }
-                    }
                 }
             }
+            
             for tool in tool_calls {
                 yield Ok(CommonConnectionContent::ToolCall(tool));
             }
@@ -159,27 +196,40 @@ impl SseConnection {
 pub struct DirectConnection;
 
 impl DirectConnection {
-    pub async fn request(url: String, key: String, body: String)->Result<Vec<CommonConnectionContent>, anyhow::Error> {
+    pub async fn request(url: String, key: String, body: String) -> std::result::Result<Vec<CommonConnectionContent>, anyhow::Error> {
         info!("请求 {}", url);
         let client = get_http_client();
-        let response = client
+        let response = match client
             .post(url.clone())
             .header(header::CONTENT_TYPE, "application/json")
             .header("Authorization", key)
             .body(body.clone())
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!(e))?;
+        {
+            Ok(resp) => resp,
+            Err(e) => return Err(anyhow::anyhow!(e)),
+        };
 
         if !response.status().is_success() {
-            let ret = response.text().await.unwrap();
+            let ret = match response.text().await {
+                Ok(text) => text,
+                Err(e) => return Err(anyhow::anyhow!(e)),
+            };
             error!("{:?}", ret);
             return Err(anyhow::anyhow!(ret));
         }
         info!("请求成功");
 
-        let text = response.text().await.unwrap();
-        let json: Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!(e))?;
+        let text = match response.text().await {
+            Ok(text) => text,
+            Err(e) => return Err(anyhow::anyhow!(e)),
+        };
+        
+        let json: Value = match serde_json::from_str(&text) {
+            Ok(json) => json,
+            Err(e) => return Err(anyhow::anyhow!(e)),
+        };
 
         let mut res = Vec::new();
         

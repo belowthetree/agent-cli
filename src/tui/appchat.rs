@@ -6,8 +6,7 @@ use log::{error, info};
 use crate::{
     chat::{Chat, EChatState, StreamedChatResponse},
     model::param::ModelMessage,
-    tui::{app::ETuiEvent, send_event, ui::inputarea::InputArea},
-    perf_start, perf_end,
+    tui::{app::ETuiEvent, send_event, ui::inputarea::InputArea}
 };
 
 /// 聊天处理器，负责处理聊天和工具执行逻辑
@@ -114,7 +113,6 @@ impl AppChat {
                 }
                 Some(Err(err)) => {
                     Self::handle_stream_error(err, tx);
-                    break;
                 }
                 None => {
                     break;

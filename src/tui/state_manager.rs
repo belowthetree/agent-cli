@@ -64,7 +64,9 @@ impl StateManager {
             app.max_line = 0;
             let messages = app.messages.clone();
             for msg in messages {
-                Self::add_block(app, MessageBlock::new(msg, width));
+                if msg.role != "tool" {
+                    Self::add_block(app, MessageBlock::new(msg, width));
+                }
             }
             return;
         }
@@ -79,7 +81,9 @@ impl StateManager {
             app.max_line = 0;
             let messages = app.messages.clone();
             for msg in messages {
-                Self::add_block(app, MessageBlock::new(msg, width));
+                if msg.role != "tool" {
+                    Self::add_block(app, MessageBlock::new(msg, width));
+                }
             }
             return;
         }
@@ -97,7 +101,9 @@ impl StateManager {
         if first_diff == old_len {
             let new_messages: Vec<_> = app.messages[old_len..].iter().cloned().collect();
             for msg in new_messages {
-                Self::add_block(app, MessageBlock::new(msg, width));
+                if msg.role != "tool" {
+                    Self::add_block(app, MessageBlock::new(msg, width));
+                }
             }
         } else {
             // 从第一个不同的消息开始重建
@@ -112,7 +118,9 @@ impl StateManager {
             // 添加剩余的消息
             let remaining_messages: Vec<_> = app.messages[first_diff..].iter().cloned().collect();
             for msg in remaining_messages {
-                Self::add_block(app, MessageBlock::new(msg, width));
+                if msg.role != "tool" {
+                    Self::add_block(app, MessageBlock::new(msg, width));
+                }
             }
         }
     }

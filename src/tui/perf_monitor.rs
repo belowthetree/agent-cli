@@ -3,7 +3,7 @@
 //! 提供执行时间监控功能，用于识别和诊断性能瓶颈。
 
 use std::time::Instant;
-use log::{debug, warn, info};
+use log::{debug, warn};
 
 /// 性能监控器
 #[derive(Debug, Clone)]
@@ -58,6 +58,7 @@ impl PerfMonitor {
     }
     
     /// 执行一个闭包并监控其执行时间
+    #[allow(unused)]
     pub fn measure<F, R>(&mut self, f: F) -> R 
     where
         F: FnOnce() -> R,

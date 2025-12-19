@@ -49,6 +49,7 @@ impl SseConnection {
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
                     Err(e) => {
+                        error!("错误 {:?}", e);
                         yield Err(anyhow::anyhow!(e.to_string()));
                         continue;
                     }
@@ -71,6 +72,7 @@ impl SseConnection {
                     
                     let json = serde_json::from_str::<Value>(data);
                     if json.is_err() {
+                        error!("错误 {:?}", json);
                         continue;
                     }
                     let json = json.unwrap();
@@ -127,7 +129,10 @@ impl SseConnection {
                                 for i in 0..arr.len() {
                                     let tool: ToolCall =
                                         serde_json::from_value(arr[i].clone())
-                                            .map_err(|e| anyhow::anyhow!(e))?;
+                                            .map_err(|e| {
+                                                error!("错误 {:?}", json);
+                                                anyhow::anyhow!(e)
+                                        })?;
                                     if tool_calls.len() <= tool.index {
                                         tool_calls.insert(tool.index, tool);
                                         continue;

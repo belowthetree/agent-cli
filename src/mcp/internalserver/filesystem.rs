@@ -129,6 +129,7 @@ impl FileSystemTool {
     /// 1. 精确匹配：搜索内容必须完全匹配
     /// 2. 模糊匹配：支持正则表达式模式
     /// 3. 行级差异：支持基于行的搜索和替换
+    /// 4. 换行符兼容：自动处理 \r\n 和 \n 的差异
     /// 
     /// 差异格式示例：
     /// ------- SEARCH
@@ -145,26 +146,82 @@ impl FileSystemTool {
         let content = fs::read_to_string(path)
             .map_err(|e| anyhow!("读取文件失败: {}", e))?;
         
-        // 查找搜索内容的位置
-        let start_pos = content.find(search)
-            .ok_or_else(|| anyhow!("在文件中未找到搜索内容: '{}'", search))?;
+        // 尝试多种搜索策略
         
-        let end_pos = start_pos + search.len();
+        // 策略1: 直接匹配
+        if let Some(pos) = content.find(search) {
+            let end_pos = pos + search.len();
+            let new_content = format!(
+                "{}{}{}",
+                &content[..pos],
+                replacement,
+                &content[end_pos..]
+            );
+            
+            fs::write(path, new_content)
+                .map_err(|e| anyhow!("写入文件失败: {}", e))?;
+            return Ok(());
+        }
         
-        // 构建新的文件内容
-        let new_content = format!(
-            "{}{}{}",
-            &content[..start_pos],
-            replacement,
-            &content[end_pos..]
-        );
+        // 策略2: 如果直接匹配失败，尝试处理换行符差异
+        // 将搜索字符串中的 \r\n 替换为 \n
+        let search_normalized = search.replace("\r\n", "\n");
+        if let Some(pos) = content.find(&search_normalized) {
+            // 使用规范化后的搜索字符串进行替换
+            let end_pos = pos + search_normalized.len();
+            let new_content = format!(
+                "{}{}{}",
+                &content[..pos],
+                replacement,
+                &content[end_pos..]
+            );
+            
+            fs::write(path, new_content)
+                .map_err(|e| anyhow!("写入文件失败: {}", e))?;
+            return Ok(());
+        }
         
-        // 写入文件
-        fs::write(path, new_content)
-            .map_err(|e| anyhow!("写入文件失败: {}", e))?;
+        // 策略3: 将 \n 替换为 \r\n
+        let search_normalized = search.replace("\n", "\r\n");
+        if let Some(pos) = content.find(&search_normalized) {
+            let end_pos = pos + search_normalized.len();
+            let new_content = format!(
+                "{}{}{}",
+                &content[..pos],
+                replacement,
+                &content[end_pos..]
+            );
+            
+            fs::write(path, new_content)
+                .map_err(|e| anyhow!("写入文件失败: {}", e))?;
+            return Ok(());
+        }
         
-        // 返回包含差异格式信息的成功结果
-        Ok(())
+        // 策略4: 移除所有多余空白字符进行匹配
+        let search_normalized: String = search.chars()
+            .filter(|c| !c.is_whitespace() || c == &'\n')
+            .collect();
+        let content_normalized: String = content.chars()
+            .filter(|c| !c.is_whitespace() || c == &'\n')
+            .collect();
+        
+        if content_normalized.contains(&search_normalized) {
+            return Err(anyhow!(
+                "在文件中未找到精确匹配的内容。建议使用更短的、独特的代码片段进行搜索。"
+            ));
+        }
+        
+        // 如果所有策略都失败，返回详细错误
+        let error_msg = if search.len() > 100 {
+            format!(
+                "在文件中未找到搜索内容。搜索字符串长度: {}，建议使用更短的、独特的代码片段",
+                search.len()
+            )
+        } else {
+            format!("在文件中未找到搜索内容: '{}'", search)
+        };
+        
+        Err(anyhow!(error_msg))
     }
 
 

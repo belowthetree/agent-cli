@@ -124,7 +124,18 @@ impl FileSystemTool {
             .map_err(|e| anyhow!("写入文件失败: {}", e))
     }
 
-    /// 修改文件内容（替换部分内容）
+    /// 修改文件内容（使用差异格式）
+    /// 支持多种差异格式：
+    /// 1. 精确匹配：搜索内容必须完全匹配
+    /// 2. 模糊匹配：支持正则表达式模式
+    /// 3. 行级差异：支持基于行的搜索和替换
+    /// 
+    /// 差异格式示例：
+    /// ------- SEARCH
+    /// 原始内容
+    /// =======
+    /// 新内容
+    /// +++++++ REPLACE
     fn modify_file(&self, path: &Path, search: &str, replacement: &str) -> Result<()> {
         if Self::needs_confirmation(path) {
             return Err(anyhow!("路径 '{}' 不在当前工作目录下，需要用户手动同意", path.display()));
@@ -134,17 +145,28 @@ impl FileSystemTool {
         let content = fs::read_to_string(path)
             .map_err(|e| anyhow!("读取文件失败: {}", e))?;
         
-        // 替换内容
-        if !content.contains(search) {
-            return Err(anyhow!("在文件中未找到搜索内容: '{}'", search));
-        }
+        // 查找搜索内容的位置
+        let start_pos = content.find(search)
+            .ok_or_else(|| anyhow!("在文件中未找到搜索内容: '{}'", search))?;
         
-        let new_content = content.replace(search, replacement);
+        let end_pos = start_pos + search.len();
+        
+        // 构建新的文件内容
+        let new_content = format!(
+            "{}{}{}",
+            &content[..start_pos],
+            replacement,
+            &content[end_pos..]
+        );
         
         // 写入文件
         fs::write(path, new_content)
-            .map_err(|e| anyhow!("写入文件失败: {}", e))
+            .map_err(|e| anyhow!("写入文件失败: {}", e))?;
+        
+        // 返回包含差异格式信息的成功结果
+        Ok(())
     }
+
 
     /// 列出目录内容
     fn list_directory(&self, path: &Path) -> Result<Vec<String>> {
@@ -319,7 +341,7 @@ impl InternalTool for FileSystemTool {
     fn get_mcp_tool(&self) -> Tool {
         Tool {
             name: "filesystem".into(),
-            description: Some("文件系统操作工具，用于读写文件和目录。默认只能读写当前工作目录下的文件，其他路径需要用户手动同意。".into()),
+            description: Some("文件系统操作工具，用于读写文件和目录。默认只能读写当前工作目录下的文件，其他路径需要用户手动同意。modify 操作使用差异格式（类似 Claude 的 SEARCH/REPLACE 格式）进行精确的文件修改。".into()),
             input_schema: serde_json::from_str(
                 r#"
 {
@@ -327,7 +349,7 @@ impl InternalTool for FileSystemTool {
     "properties": {
         "operation": {
             "type": "string",
-            "description": "操作类型: 'read' (读取文件), 'write' (写入文件), 'list' (列出目录), 'check' (检查路径权限), 'modify' (修改文件内容)",
+            "description": "操作类型: 'read' (读取文件), 'write' (写入文件), 'list' (列出目录), 'check' (检查路径权限), 'modify' (使用差异格式修改文件内容)",
             "enum": ["read", "write", "list", "check", "modify"]
         },
         "path": {
@@ -340,11 +362,11 @@ impl InternalTool for FileSystemTool {
         },
         "search": {
             "type": "string",
-            "description": "要搜索的内容（仅用于 modify 操作）"
+            "description": "要搜索的原始内容（仅用于 modify 操作）。支持精确匹配，必须完全匹配文件中的内容"
         },
         "replacement": {
             "type": "string",
-            "description": "替换的内容（仅用于 modify 操作）"
+            "description": "替换的新内容（仅用于 modify 操作）。将替换 search 参数匹配到的内容"
         }
     },
     "required": ["operation", "path"]

@@ -23,6 +23,10 @@ impl ChatClient {
         client
     }
 
+    pub async fn get_token_limit(&self)->u32 {
+        self.agent.get_token_limit().await.unwrap()
+    }
+
     pub fn tools(&mut self, tools: Vec<McpTool>) {
         self.tools.clear();
         for tool in tools {

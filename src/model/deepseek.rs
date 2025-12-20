@@ -81,6 +81,10 @@ impl DeepseekModel {
 }
 
 impl AgentModel for DeepseekModel {
+    async fn get_token_limit(&self) -> Result<u32, anyhow::Error> {
+        Ok(64000)
+    }
+
     async fn chat(&self, param: ModelInputParam) -> Result<Vec<CommonConnectionContent>, anyhow::Error> {
         let messages = param.messages;
         let mut tools = Vec::new();

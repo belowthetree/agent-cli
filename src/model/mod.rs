@@ -12,4 +12,7 @@ pub trait AgentModel {
         &self,
         param: param::ModelInputParam,
     ) -> impl Stream<Item = Result<CommonConnectionContent, anyhow::Error>>;
+
+    // 返回模型的上下文窗口大小（最大token数）
+    async fn get_token_limit(&self) -> Result<u32, anyhow::Error>;
 }

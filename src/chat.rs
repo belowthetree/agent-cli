@@ -98,6 +98,10 @@ impl Chat {
             })
     }
 
+    pub async fn get_token_limit(&self)->u32 {
+        self.state.client.get_token_limit().await
+    }
+
     pub fn is_running(&self) -> bool {
         self.state.get_state() == EChatState::Running
     }

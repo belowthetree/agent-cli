@@ -13,6 +13,34 @@ mod prompt;
 mod tui;
 mod remote;
 
+/// 创建默认的log4rs配置文件
+fn create_default_log4rs_config() -> anyhow::Result<()> {
+    let default_config = r#"---
+# log4rs.yaml
+# 检查配置文件变动的时间间隔
+refresh_rate: 30 seconds
+# appender 负责将日志收集到控制台或文件, 可配置多个
+appenders:
+  stdout:
+    kind: console
+  file:
+    kind: file
+    path: "log/agent-cli.log"
+    encoder:
+      # log 信息模式
+      pattern: "[{d(%Y-%m-%d %H:%M:%S)}][{level}][{f}]:{line} - {m}{n}"
+# 对全局 log 进行配置
+root:
+  level: warn
+  appenders:
+    - file
+"#;
+
+    std::fs::write("log4rs.yaml", default_config)?;
+    println!("已创建默认的log4rs.yaml配置文件，全局log等级为warn");
+    Ok(())
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -38,6 +66,10 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // 检查log4rs.yaml是否存在，如果不存在则创建默认配置
+    if !std::path::Path::new("log4rs.yaml").exists() {
+        create_default_log4rs_config()?;
+    }
     log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
     mcp::init().await;
     let config = config::Config::local().unwrap();

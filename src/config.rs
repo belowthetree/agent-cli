@@ -93,7 +93,7 @@ fn max_tool_try_default() -> usize {
     3
 }
 fn max_context_num_default() -> usize {
-    3
+    30
 }
 fn max_tokens_default() -> Option<u32> {
     Some(64000)

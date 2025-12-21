@@ -17,6 +17,8 @@ pub enum EChatState {
     WaitingToolUse,
     // 等待继续对话确认
     WaitingTurnConfirm,
+    // 压缩对话中
+    Compressing,
 }
 
 /// Chat 状态管理模块
@@ -164,6 +166,35 @@ impl ChatState {
             }
         } else {
             vec![]
+        }
+    }
+
+    /// 获取当前token使用量（基于最后一条消息的token使用记录）
+    pub fn get_current_token_usage(&self) -> u32 {
+        if let Some(last) = self.context().last() {
+            if let Some(usage) = &last.token_usage {
+                return usage.total_tokens;
+            }
+        }
+        0
+    }
+
+    /// 检查是否需要自动压缩（基于token使用比例）
+    pub fn should_auto_compress(&self, threshold: f32, max_tokens: Option<u32>) -> bool {
+        if let Some(max) = max_tokens {
+            if max == 0 {
+                return false;
+            }
+            let current = self.get_current_token_usage();
+            let ratio = current as f32 / max as f32;
+            let should_compress = ratio >= threshold;
+            if should_compress {
+                info!("Token使用比例: {:.2}%, 阈值: {}%, 触发自动压缩", 
+                    ratio * 100.0, threshold * 100.0);
+            }
+            should_compress
+        } else {
+            false
         }
     }
 }

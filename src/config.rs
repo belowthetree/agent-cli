@@ -103,6 +103,14 @@ fn ask_before_tool_execution_default() -> bool {
     false
 }
 
+fn auto_compress_threshold_default() -> f32 {
+    0.8
+}
+
+fn compress_trigger_ratio_default() -> f32 {
+    0.7
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct EnvConfig {
     pub key: String,
@@ -124,6 +132,10 @@ pub struct Config {
     pub max_tokens: Option<u32>,
     #[serde(default = "ask_before_tool_execution_default")]
     pub ask_before_tool_execution: bool,
+    #[serde(default = "auto_compress_threshold_default")]
+    pub auto_compress_threshold: f32,
+    #[serde(default = "compress_trigger_ratio_default")]
+    pub compress_trigger_ratio: f32,
     pub prompt: Option<String>,
     #[serde(default)]
     pub envs: Vec<EnvConfig>,
@@ -165,6 +177,8 @@ impl Config {
             max_context_num: max_context_num_default(),
             max_tokens: max_tokens_default(),
             ask_before_tool_execution: ask_before_tool_execution_default(),
+            auto_compress_threshold: auto_compress_threshold_default(),
+            compress_trigger_ratio: compress_trigger_ratio_default(),
             prompt: None,
             envs: Vec::new(),
         };

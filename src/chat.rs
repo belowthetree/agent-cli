@@ -18,6 +18,8 @@ pub use chat_stream::{StreamedChatResponse};
 pub struct Chat {
     state: ChatState,
     max_context_num: usize,
+    max_tokens: Option<u32>,        // 保存token限制的副本
+    auto_compress_threshold: f32,  // 自动压缩阈值（token使用比例）
 }
 
 /// Chat 构建器，用于改进初始化和配置验证
@@ -77,7 +79,12 @@ impl ChatBuilder {
             ask_before_tool_execution,
         );
 
-        Ok(Chat { state, max_context_num })
+        Ok(Chat { 
+            state, 
+            max_context_num,
+            max_tokens,  // 保存max_tokens副本
+            auto_compress_threshold: self.config.auto_compress_threshold,
+        })
     }
 }
 
@@ -281,12 +288,48 @@ impl Chat {
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a {
         self.state.add_message(ModelMessage::user(prompt.to_string()));
         async_stream::stream! {
+            // 检查是否需要自动压缩
+            if self.should_auto_compress() {
+                info!("检测到需要自动压缩，正在执行...");
+                // 执行自动压缩
+                let compressed = self.auto_compress_if_needed().await;
+                if compressed {
+                    info!("自动压缩完成，继续处理聊天");
+                } else {
+                    warn!("自动压缩失败，继续处理聊天");
+                }
+            }
+            
             let stream = self.stream_rechat();
             pin_mut!(stream);
             while let Some(res) = stream.next().await {
                 yield res;
             }
         }
+    }
+
+    /// 检查是否需要自动压缩
+    pub fn should_auto_compress(&self) -> bool {
+        // 获取max_tokens的值
+        let max_tokens = self.get_token_limit_sync();
+        self.state.should_auto_compress(self.auto_compress_threshold, max_tokens)
+    }
+
+    /// 同步获取token限制（用于自动压缩检查）
+    fn get_token_limit_sync(&self) -> Option<u32> {
+        // 从ChatState中获取max_tokens
+        // ChatState的max_tokens字段是私有的，但我们可以通过其他方式获取
+        // 这里我们返回Chat结构中保存的max_tokens副本
+        self.max_tokens
+    }
+
+    /// 自动压缩对话（异步版本，供外部调用）
+    pub async fn auto_compress_if_needed(&mut self) -> bool {
+        if self.should_auto_compress() {
+            info!("Token使用超过阈值，触发自动压缩");
+            return self.compress_conversation().await;
+        }
+        false
     }
 
     pub fn add_message(&mut self, msg: ModelMessage) {
@@ -315,5 +358,104 @@ impl Chat {
 
     pub fn clear_context(&mut self) {
         self.state.context_mut().clear();
+    }
+
+    /// 主动向模型要求压缩对话，压缩后的对话将取代原对话上下文
+    /// 返回压缩是否成功的布尔值
+    pub async fn compress_conversation(&mut self) -> bool {
+        // 临时保存当前上下文，以便压缩失败时恢复
+        let original_context = self.state.context().clone();
+        
+        // 如果上下文为空或只有系统消息，不需要压缩
+        if original_context.len() <= 1 {
+            info!("上下文过短，无需压缩");
+            return true;
+        }
+
+        // 构建压缩prompt
+        let compress_prompt = self.build_compress_prompt();
+        
+        info!("开始压缩对话，当前上下文长度: {}", original_context.len());
+        
+        // 创建一个临时的压缩消息，包含当前上下文
+        let mut compress_messages = vec![ModelMessage::system("你是一个对话压缩助手。请将以下对话压缩成简洁的摘要，保留关键信息和上下文，但大幅减少token使用。只返回压缩后的摘要内容，不要添加额外解释。")];
+        
+        // 添加除了系统消息外的所有消息作为参考
+        for msg in &original_context[1..] {
+            let role = msg.role.as_ref();
+            let content = msg.content.as_ref();
+            let think = if !msg.think.is_empty() {
+                format!(" [思考: {}]", msg.think.as_ref())
+            } else {
+                String::new()
+            };
+            compress_messages.push(ModelMessage::user(format!("{}: {}{}", role, content, think)));
+        }
+        
+        compress_messages.push(ModelMessage::user(compress_prompt));
+
+        // 先获取client的引用，避免后续借用冲突
+        let client = self.state.client().clone();
+        
+        // 使用非流式方式请求压缩
+        self.state.set_state(EChatState::Compressing);
+        let stream = client.chat2(compress_messages);
+        pin_mut!(stream);
+        
+        let mut compressed_content = String::new();
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(msg) => {
+                    compressed_content.push_str(&msg.content);
+                }
+                Err(e) => {
+                    warn!("压缩失败: {}", e);
+                    self.state.set_state(EChatState::Idle);
+                    return false;
+                }
+            }
+        }
+        self.state.set_state(EChatState::Idle);
+
+        if compressed_content.trim().is_empty() {
+            warn!("压缩返回空内容");
+            return false;
+        }
+
+        // 构建新的压缩后上下文
+        let mut new_context = Vec::new();
+        
+        // 保留系统消息
+        if let Some(system_msg) = original_context.first() {
+            if system_msg.role == "system" {
+                new_context.push(system_msg.clone());
+            }
+        }
+        
+        // 添加压缩后的摘要作为用户消息
+        new_context.push(ModelMessage::user(format!("对话历史摘要: {}", compressed_content)));
+        
+        // 替换上下文
+        *self.state.context_mut() = new_context;
+        
+        // 重置对话轮次计数，因为现在上下文被压缩了
+        self.state.reset_conversation_turn();
+        
+        info!("对话压缩成功，新上下文长度: {}", self.state.context().len());
+        true
+    }
+
+    /// 构建压缩prompt
+    fn build_compress_prompt(&self) -> String {
+        r#"请将上面的对话历史压缩成一个简洁的摘要。要求：
+1. 保留对话的核心主题和关键信息
+2. 保留用户的重要需求和问题
+3. 保留重要的技术细节和决策
+4. 大幅减少冗余的对话轮次
+5. 保持逻辑连贯性
+6. 只返回压缩后的摘要，不要添加任何解释或说明
+
+压缩后的摘要应该足够简洁，但包含所有必要信息，以便继续对话时能理解上下文。"#
+.to_string()
     }
 }

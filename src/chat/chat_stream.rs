@@ -61,6 +61,7 @@ impl ChatStream {
                             }
                             // 保存token使用情况
                             if let Some(usage) = res.token_usage {
+                                msg.add_token(usage.clone());
                                 yield Ok(StreamedChatResponse::TokenUsage(usage));
                             }
                         },
@@ -70,7 +71,6 @@ impl ChatStream {
             }
             yield Ok(StreamedChatResponse::End);
             chat.add_message(msg.clone());
-            chat.state.set_state(crate::chat::EChatState::Idle);
             info!("退出");
         }
     }
@@ -155,7 +155,6 @@ impl ChatStream {
                     break;
                 }
             }
-            state.set_state(crate::chat::EChatState::Idle);
         }
     }
 
@@ -163,40 +162,7 @@ impl ChatStream {
     pub fn handle_rechat(
         chat: &mut Chat,
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
-        let mut tools = Vec::new();
-        if let Some(last) = chat.state.context().last() {
-            if let Some(calls) = &last.tool_calls {
-                for tool in calls {
-                    tools.push(tool.clone());
-                }
-            }
-        }
-        
         stream! {
-            info!("stream_rechat 工具数 {:?}", tools);
-            let mut tool_responses = Vec::new();
-            {
-                let stream = ChatTools::call_tool(tools, chat.state.get_cancel_token());
-                pin_mut!(stream);
-                while let Some(res) = stream.next().await {
-                    match res {
-                        Ok(res) => {
-                            yield Ok(StreamedChatResponse::ToolResponse(res.clone()));
-                            tool_responses.push(res);
-                        }
-                        Err(e) => {
-                            yield Err(e);
-                        }
-                    }
-                    if chat.state.get_cancel_token().is_cancelled() {
-                        info!("工具取消");
-                        break;
-                    }
-                }
-            }
-            for response in tool_responses {
-                chat.state.add_message(response);
-            }
             let stream = Self::handle_stream_chat(chat);
             pin_mut!(stream);
             while let Some(res) = stream.next().await {

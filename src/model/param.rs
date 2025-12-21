@@ -133,6 +133,10 @@ impl ModelMessage {
             self.think = Cow::Owned(owned);
         }
     }
+
+    pub fn add_token(&mut self, token: TokenUsage) {
+        self.token_usage = Some(token);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

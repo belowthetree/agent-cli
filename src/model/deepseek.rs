@@ -82,7 +82,7 @@ impl DeepseekModel {
 
 impl AgentModel for DeepseekModel {
     fn get_token_limit(&self) -> u32 {
-        10000
+        64000
     }
 
     async fn chat(&self, param: ModelInputParam) -> Result<Vec<CommonConnectionContent>, anyhow::Error> {

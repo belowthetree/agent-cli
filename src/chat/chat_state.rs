@@ -63,12 +63,12 @@ impl ChatState {
 
     pub fn set_state(&mut self, state: EChatState) {
         info!("设置状态 {:?}", state);
-        // 重置下取消令牌
-        if state == EChatState::Idle {
-            self.cancel_token = CancellationToken::new();
-            info!("刷新 {}", self.cancel_token.is_cancelled());
-        }
         self.state = state;
+    }
+
+    pub fn reset_cancel_token(&mut self) {
+        info!("刷新取消令牌");
+        self.cancel_token = CancellationToken::new();
     }
 
     /// 获取取消令牌的副本
@@ -169,9 +169,11 @@ impl ChatState {
 
     /// 获取当前token使用量（基于最后一条消息的token使用记录）
     pub fn get_current_token_usage(&self) -> u32 {
-        if let Some(last) = self.context().last() {
-            if let Some(usage) = &last.token_usage {
-                return usage.total_tokens;
+        for ctx in self.context().iter().rev() {
+            if let Some(usage) = &ctx.token_usage {
+                if usage.total_tokens > 0 {
+                    return usage.total_tokens;
+                }
             }
         }
         0
@@ -184,6 +186,7 @@ impl ChatState {
         }
         let current = self.get_current_token_usage();
         let ratio = current as f32 / max_tokens as f32;
+        info!("比例 {} {} {}", current, ratio, threshold);
         let should_compress = ratio >= threshold;
         if should_compress {
             info!("Token使用比例: {:.2}%, 阈值: {}%, 触发自动压缩", 

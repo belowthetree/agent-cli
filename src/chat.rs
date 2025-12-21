@@ -169,6 +169,17 @@ impl Chat {
                     info!("超过对话轮次 {} {}", self.state.get_conversation_turn_info(), self.max_context_num);
                     self.state.set_state(EChatState::WaitingTurnConfirm);
                 }
+                // 检查是否需要自动压缩
+                if self.should_auto_compress() {
+                    info!("检测到需要自动压缩，正在执行...");
+                    // 执行自动压缩
+                    let compressed = self.auto_compress_if_needed().await;
+                    if compressed {
+                        info!("自动压缩完成，继续处理聊天");
+                    } else {
+                        warn!("自动压缩失败，继续处理聊天");
+                    }
+                }
                 if self.get_state() == EChatState::Idle || self.get_state() == EChatState::WaitingToolUse {
                     // 如果有工具调用需要确认，退出等待确认
                     if self.is_need_tool_confirm() {
@@ -202,9 +213,9 @@ impl Chat {
                         break;
                     }
                     // 无工具调用，退出循环
+                    self.state.set_state(EChatState::Idle);
                     if !self.is_remain_tool_call() {
                         info!("对话结束");
-                        self.state.set_state(EChatState::Idle);
                         break;
                     }
                     info!("有工具需要调用");
@@ -214,6 +225,7 @@ impl Chat {
                     break;
                 }
             }
+            self.state.reset_cancel_token()
         }
     }
 
@@ -227,6 +239,17 @@ impl Chat {
                 if self.is_over_context_limit() {
                     info!("超过对话轮次 {} {}", self.state.get_conversation_turn_info(), self.max_context_num);
                     self.state.set_state(EChatState::WaitingTurnConfirm);
+                }
+                // 检查是否需要自动压缩
+                if self.should_auto_compress() {
+                    info!("检测到需要自动压缩，正在执行...");
+                    // 执行自动压缩
+                    let compressed = self.auto_compress_if_needed().await;
+                    if compressed {
+                        info!("自动压缩完成，继续处理聊天");
+                    } else {
+                        warn!("自动压缩失败，继续处理聊天");
+                    }
                 }
                 if self.get_state() == EChatState::Idle || self.get_state() == EChatState::WaitingToolUse {
                     // 如果有工具调用需要确认，退出等待确认
@@ -261,9 +284,9 @@ impl Chat {
                         break;
                     }
                     // 无工具调用，退出循环
+                    self.state.set_state(EChatState::Idle);
                     if !self.is_remain_tool_call() {
                         info!("对话结束");
-                        self.state.set_state(EChatState::Idle);
                         break;
                     }
                 } else {
@@ -275,6 +298,7 @@ impl Chat {
                     break;
                 }
             }
+            self.state.reset_cancel_token()
         }
     }
 
@@ -284,18 +308,6 @@ impl Chat {
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a {
         self.state.add_message(ModelMessage::user(prompt.to_string()));
         async_stream::stream! {
-            // 检查是否需要自动压缩
-            if self.should_auto_compress() {
-                info!("检测到需要自动压缩，正在执行...");
-                // 执行自动压缩
-                let compressed = self.auto_compress_if_needed().await;
-                if compressed {
-                    info!("自动压缩完成，继续处理聊天");
-                } else {
-                    warn!("自动压缩失败，继续处理聊天");
-                }
-            }
-            
             let stream = self.stream_rechat();
             pin_mut!(stream);
             while let Some(res) = stream.next().await {
@@ -308,6 +320,7 @@ impl Chat {
     pub fn should_auto_compress(&self) -> bool {
         // 获取max_tokens的值
         let max_tokens = self.get_token_limit();
+        info!("限制：{} {}", max_tokens, self.auto_compress_threshold);
         self.state.should_auto_compress(self.auto_compress_threshold, max_tokens)
     }
 

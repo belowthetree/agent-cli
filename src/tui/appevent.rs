@@ -288,7 +288,9 @@ impl AppEvent {
                             app.messages[idx].add_tool(tool);
                         }
                     }
-                    app.messages[idx].token_usage = msg.token_usage;
+                    if let Some(usage) = msg.token_usage {
+                        app.messages[idx].token_usage = Some(usage);
+                    }
                 } else if app.messages.len() == idx {
                     app.messages.push(msg);
                 } else {

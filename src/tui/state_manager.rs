@@ -45,6 +45,9 @@ impl StateManager {
                 let (current_turn, max_turn) = conversation_turn_info;
                 Self::add_system_message_block(app, format!("对话轮次已达到上限 ({}/{}), 是否继续？输入 yes/y 继续并重置计数，no/n 停止", current_turn, max_turn));
             },
+            EChatState::Compressing => {
+                Self::add_system_message_block(app, format!("正在压缩对话中..."));
+            }
             _=>{}
         }
         

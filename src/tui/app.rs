@@ -120,7 +120,7 @@ impl App {
     /// 
     /// 循环持续运行直到用户退出（按ESC键）或发生错误。
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
-        info!("上下文限制 {}", self.chat.lock().unwrap().get_token_limit().await);
+        info!("上下文限制 {}", self.chat.lock().unwrap().get_token_limit());
         let cancel = CancellationToken::new();
         let t = tokio::spawn(
         AppEvent::watch_events(

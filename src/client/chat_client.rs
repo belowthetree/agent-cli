@@ -23,7 +23,7 @@ impl ChatClient {
         client
     }
 
-    pub async fn get_token_limit(&self)->u32 {
+    pub fn get_token_limit(&self)->u32 {
         self.agent.get_token_limit()
     }
 

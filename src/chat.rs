@@ -17,8 +17,7 @@ pub use chat_stream::{StreamedChatResponse};
 #[derive(Clone)]
 pub struct Chat {
     state: ChatState,
-    max_context_num: usize,
-    max_tokens: Option<u32>,        // 保存token限制的副本
+    max_context_num: usize,   // 保存token限制的副本
     auto_compress_threshold: f32,  // 自动压缩阈值（token使用比例）
 }
 
@@ -26,7 +25,6 @@ pub struct Chat {
 pub struct ChatBuilder {
     config: Config,
     tools: Vec<McpTool>,
-    max_tokens: Option<Option<u32>>,
     ask_before_tool_execution: Option<bool>,
     max_context_num: Option<usize>,
 }
@@ -37,7 +35,6 @@ impl ChatBuilder {
         Self {
             config,
             tools: Vec::new(),
-            max_tokens: None,
             ask_before_tool_execution: None,
             max_context_num: None,
         }
@@ -51,7 +48,6 @@ impl ChatBuilder {
         }
 
         // 使用构建器中的值或回退到配置中的默认值
-        let max_tokens = self.max_tokens.unwrap_or(self.config.max_tokens);
         let ask_before_tool_execution = self.ask_before_tool_execution.unwrap_or(self.config.ask_before_tool_execution);
         let max_context_num = self.max_context_num.unwrap_or(self.config.max_context_num);
 
@@ -72,17 +68,17 @@ impl ChatBuilder {
                 .unwrap_or_else(|| prompt::get_default_enhanced_prompt())
         )];
 
+        let tokens = client.get_token_limit();
         let state = ChatState::new(
             client,
             context,
-            max_tokens,
+            tokens,
             ask_before_tool_execution,
         );
 
         Ok(Chat { 
             state, 
             max_context_num,
-            max_tokens,  // 保存max_tokens副本
             auto_compress_threshold: self.config.auto_compress_threshold,
         })
     }
@@ -105,8 +101,8 @@ impl Chat {
             })
     }
 
-    pub async fn get_token_limit(&self)->u32 {
-        self.state.client.get_token_limit().await
+    pub fn get_token_limit(&self)->u32 {
+        self.state.client.get_token_limit()
     }
 
     pub fn is_running(&self) -> bool {
@@ -311,16 +307,8 @@ impl Chat {
     /// 检查是否需要自动压缩
     pub fn should_auto_compress(&self) -> bool {
         // 获取max_tokens的值
-        let max_tokens = self.get_token_limit_sync();
+        let max_tokens = self.get_token_limit();
         self.state.should_auto_compress(self.auto_compress_threshold, max_tokens)
-    }
-
-    /// 同步获取token限制（用于自动压缩检查）
-    fn get_token_limit_sync(&self) -> Option<u32> {
-        // 从ChatState中获取max_tokens
-        // ChatState的max_tokens字段是私有的，但我们可以通过其他方式获取
-        // 这里我们返回Chat结构中保存的max_tokens副本
-        self.max_tokens
     }
 
     /// 自动压缩对话（异步版本，供外部调用）

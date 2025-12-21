@@ -104,7 +104,7 @@ fn ask_before_tool_execution_default() -> bool {
 }
 
 fn auto_compress_threshold_default() -> f32 {
-    0.8
+    0.6
 }
 
 fn compress_trigger_ratio_default() -> f32 {

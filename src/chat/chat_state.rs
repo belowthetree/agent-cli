@@ -30,7 +30,7 @@ pub struct ChatState {
     cancel_token: tokio_util::sync::CancellationToken,
     state: EChatState,
     /// token限制
-    max_tokens: Option<u32>,
+    max_tokens: u32,
     /// 是否在工具执行前询问用户确认
     ask_before_tool_execution: bool,
     /// 对话轮次统计
@@ -42,7 +42,7 @@ impl ChatState {
     pub fn new(
         client: ChatClient,
         context: Vec<ModelMessage>,
-        max_tokens: Option<u32>,
+        max_tokens: u32,
         ask_before_tool_execution: bool,
     ) -> Self {
         Self {
@@ -119,25 +119,23 @@ impl ChatState {
     /// 检查token使用是否超过限制
     /// 返回true表示超过限制，应该停止生成
     pub fn check_token_limit(&self, new_usage: Option<&crate::connection::TokenUsage>) -> bool {
-        if let Some(max_tokens) = self.max_tokens {
-            // 计算当前上下文的总token使用量
-            let mut total_tokens = 0;
-            if let Some(last) = self.context.last() {
-                if let Some(usage) = &last.token_usage {
-                    total_tokens = usage.total_tokens;
-                }
+        // 计算当前上下文的总token使用量
+        let mut total_tokens = 0;
+        if let Some(last) = self.context.last() {
+            if let Some(usage) = &last.token_usage {
+                total_tokens = usage.total_tokens;
             }
-            
-            // 如果提供了新的使用量，加上它
-            if let Some(usage) = new_usage {
-                total_tokens += usage.total_tokens;
-            }
-            
-            // 检查是否超过限制
-            if total_tokens > max_tokens {
-                log::warn!("Token使用超过限制: {}/{} tokens", total_tokens, max_tokens);
-                return true;
-            }
+        }
+        
+        // 如果提供了新的使用量，加上它
+        if let Some(usage) = new_usage {
+            total_tokens += usage.total_tokens;
+        }
+        
+        // 检查是否超过限制
+        if total_tokens > self.max_tokens {
+            log::warn!("Token使用超过限制: {}/{} tokens", total_tokens, self.max_tokens);
+            return true;
         }
         false
     }
@@ -180,21 +178,17 @@ impl ChatState {
     }
 
     /// 检查是否需要自动压缩（基于token使用比例）
-    pub fn should_auto_compress(&self, threshold: f32, max_tokens: Option<u32>) -> bool {
-        if let Some(max) = max_tokens {
-            if max == 0 {
-                return false;
-            }
-            let current = self.get_current_token_usage();
-            let ratio = current as f32 / max as f32;
-            let should_compress = ratio >= threshold;
-            if should_compress {
-                info!("Token使用比例: {:.2}%, 阈值: {}%, 触发自动压缩", 
-                    ratio * 100.0, threshold * 100.0);
-            }
-            should_compress
-        } else {
-            false
+    pub fn should_auto_compress(&self, threshold: f32, max_tokens: u32) -> bool {
+        if max_tokens == 0 {
+            return false;
         }
+        let current = self.get_current_token_usage();
+        let ratio = current as f32 / max_tokens as f32;
+        let should_compress = ratio >= threshold;
+        if should_compress {
+            info!("Token使用比例: {:.2}%, 阈值: {}%, 触发自动压缩", 
+                ratio * 100.0, threshold * 100.0);
+        }
+        should_compress
     }
 }

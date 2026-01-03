@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::{
     config,
-    mcp::internalserver::{InternalTool, filesystem::FileSystemTool},
+    mcp::internalserver::{InternalTool, filesystem::FileSystemTool, shell_command::ShellCommandTool},
 };
 
 pub async fn init() {
@@ -36,6 +36,7 @@ pub async fn init() {
         }
     }
     let _ = mgr.add_internal_tool(Arc::new(FileSystemTool));
+    let _ = mgr.add_internal_tool(Arc::new(ShellCommandTool));
 }
 
 #[allow(unused)]

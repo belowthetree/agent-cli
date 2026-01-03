@@ -55,10 +55,25 @@ pub fn build_enhanced_prompt(base_prompt: &str) -> String {
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|_| "无法获取当前目录".to_string());
     
+    // 获取系统信息
+    let os_info = get_system_info();
+    
     // 构建增强的prompt
     format!(
-        "当前时间: {}\n当前工作目录: {}\n\n{}",
-        formatted_time, current_dir, base_prompt
+        "{}\n当前时间: {}\n当前工作目录: {}\n\n{}",
+        os_info, formatted_time, current_dir, base_prompt
+    )
+}
+
+/// 获取系统信息
+fn get_system_info() -> String {
+    let os_name = env::consts::OS;
+    let arch = env::consts::ARCH;
+    let family = env::consts::FAMILY;
+
+    format!(
+        "操作系统: {}\n架构: {}\n系统家族: {}",
+        os_name, arch, family
     )
 }
 

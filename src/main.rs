@@ -57,7 +57,7 @@ struct Args {
     #[arg(short, long, default_value = "false")]
     wait: Option<bool>,
     /// 启动远程WebSocket服务器
-    #[arg(long)]
+    #[arg(long, default_missing_value = "0.0.0.0:3838", num_args = 0..=1)]
     remote: Option<String>,
     #[cfg(feature = "napcat")]
     #[arg(short, long, default_value_t = false)]

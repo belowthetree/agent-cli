@@ -38,7 +38,7 @@ root:
 "#;
 
     std::fs::write("log4rs.yaml", default_config)?;
-    println!("已创建默认的log4rs.yaml配置文件，全局log等级为warn");
+    info!("已创建默认的log4rs.yaml配置文件，全局log等级为warn");
     Ok(())
 }
 
@@ -63,6 +63,12 @@ struct Args {
     #[cfg(feature = "napcat")]
     #[arg(short, long, default_value_t = false)]
     napcat: bool,
+    /// 启动ACP模式
+    #[arg(long)]
+    acp: bool,
+    /// ACP传输模式（仅对ACP模式有效）：stdio（默认）、wss、http
+    #[arg(long, default_value = "stdio")]
+    transport: String,
 }
 
 #[tokio::main]
@@ -99,6 +105,13 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // 优先处理 ACP 模式
+    if args.acp {
+        info!("Starting ACP server with transport: {}", args.transport);
+        start_acp_server(args.transport).await?;
+        return Ok(());
+    }
+
     // 处理 wait 模式
     if Some(true) == args.wait {
         wait_mode(args).await;
@@ -121,6 +134,27 @@ async fn chat() {
     } else {
         handle_output(chat.chat(&args.prompt.unwrap_or_default())).await.unwrap();
     }
+}
+
+/// 启动ACP服务器
+async fn start_acp_server(transport: String) -> anyhow::Result<()> {
+    info!("开启 acp");
+    use crate::acp::agent_impl::run_stdio_agent;
+    
+    let server_name = "agent-cli".to_string();
+    let server_version = env!("CARGO_PKG_VERSION").to_string();
+    
+    match transport.as_str() {
+        "stdio" => {
+            info!("ACP Agent (stdio) starting...");
+            run_stdio_agent(server_name, server_version).await?;
+        }
+        _ => {
+            return Err(anyhow::anyhow!("不支持的传输模式: {}，目前只支持 stdio", transport));
+        }
+    }
+    
+    Ok(())
 }
 
 async fn wait_mode(args: Args) {

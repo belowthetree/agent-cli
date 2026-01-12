@@ -6,13 +6,13 @@ use crate::mcp::McpTool;
 use crate::model::param::{ModelMessage};
 use crate::prompt;
 
-mod chat_state;
-mod chat_stream;
+pub mod chat_state;
+pub mod chat_stream;
 mod chat_tools;
 
 pub use chat_state::EChatState;
 pub use chat_state::ChatState;
-pub use chat_stream::{StreamedChatResponse};
+pub use chat_stream::StreamedChatResponse;
 
 #[derive(Clone)]
 pub struct Chat {

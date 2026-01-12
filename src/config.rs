@@ -1,4 +1,5 @@
 use anyhow;
+use log::info;
 use rmcp::serde;
 use rmcp::{RoleClient, ServiceExt, service::RunningService};
 use serde::{Deserialize, Serialize};
@@ -160,7 +161,7 @@ impl Config {
     }
     
     fn create_default_config() -> Result<Self, Box<dyn std::error::Error>> {
-        println!("=== 配置文件初始化 ===");
+        info!("=== 配置文件初始化 ===");
         
         // 获取必要的配置信息
         let api_key = Self::prompt_user_input("请输入API密钥（必填）: ")?;

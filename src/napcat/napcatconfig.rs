@@ -1,3 +1,4 @@
+use log::info;
 use onebot_v11::{MessageSegment, event::message::GroupMessage};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -40,7 +41,7 @@ impl NapCatConfig {
     }
     
     fn create_default_config() -> Result<Self, anyhow::Error> {
-        println!("=== NapCat 配置文件初始化 ===");
+        info!("=== NapCat 配置文件初始化 ===");
         
         // 获取必要的配置信息
         let self_qq = Self::prompt_user_input_i64("请输入机器人QQ号（必填）: ")?;

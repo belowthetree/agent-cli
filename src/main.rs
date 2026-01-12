@@ -14,9 +14,36 @@ mod tui;
 mod remote;
 mod acp;
 
+/// 获取日志配置文件路径
+fn get_log_config_path(acp_mode: bool) -> (String, Option<std::path::PathBuf>) {
+    if acp_mode {
+        // ACP 模式下使用标准数据路径
+        if let Some(data_dir) = dirs::data_local_dir() {
+            let config_path = data_dir.join("agent-cli").join("log4rs.yaml");
+            let log_dir = data_dir.join("agent-cli").join("log");
+            return (config_path.to_string_lossy().to_string(), Some(log_dir));
+        }
+        // 降级到当前目录
+        ("log4rs.yaml".to_string(), None)
+    } else {
+        // 非 ACP 模式使用相对路径
+        ("log4rs.yaml".to_string(), None)
+    }
+}
+
 /// 创建默认的log4rs配置文件
-fn create_default_log4rs_config() -> anyhow::Result<()> {
-    let default_config = r#"---
+fn create_default_log4rs_config(acp_mode: bool) -> anyhow::Result<()> {
+    let (_config_path, log_dir) = get_log_config_path(acp_mode);
+    
+    let log_path = if let Some(dir) = log_dir {
+        std::fs::create_dir_all(&dir)?;
+        dir.join("agent-cli.log").to_string_lossy().to_string()
+    } else {
+        "log/agent-cli.log".to_string()
+    };
+    let log_path = log_path.replace("\\", "/");
+
+    let default_config = format!(r#"---
 # log4rs.yaml
 # 检查配置文件变动的时间间隔
 refresh_rate: 30 seconds
@@ -26,16 +53,27 @@ appenders:
     kind: console
   file:
     kind: file
-    path: "log/agent-cli.log"
+    path: "{}"
     encoder:
       # log 信息模式
-      pattern: "[{d(%Y-%m-%d %H:%M:%S)}][{level}][{f}]:{line} - {m}{n}"
+      pattern: "[{{d(%Y-%m-%d %H:%M:%S)}}][{{level}}][{{f}}]:{{line}} - {{m}}{{n}}"
 # 对全局 log 进行配置
 root:
-  level: info
+  level: warn
   appenders:
     - file
-"#;
+"#, log_path);
+
+    if acp_mode {
+        // ACP 模式下将配置文件写入标准数据路径
+        if let Some(data_dir) = dirs::data_local_dir() {
+            let config_path = data_dir.join("agent-cli").join("log4rs.yaml");
+            std::fs::create_dir_all(data_dir.join("agent-cli"))?;
+            std::fs::write(&config_path, default_config)?;
+            info!("已创建ACP模式的log4rs.yaml配置文件到: {}", config_path.display());
+            return Ok(());
+        }
+    }
 
     std::fs::write("log4rs.yaml", default_config)?;
     info!("已创建默认的log4rs.yaml配置文件，全局log等级为warn");
@@ -64,7 +102,7 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     napcat: bool,
     /// 启动ACP模式
-    #[arg(long)]
+    #[arg(long, default_missing_value = "true", num_args = 0..=1)]
     acp: bool,
     /// ACP传输模式（仅对ACP模式有效）：stdio（默认）、wss、http
     #[arg(long, default_value = "stdio")]
@@ -73,20 +111,27 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 检查log4rs.yaml是否存在，如果不存在则创建默认配置
-    if !std::path::Path::new("log4rs.yaml").exists() {
-        create_default_log4rs_config()?;
-    }
-    log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
-    mcp::init().await;
     let args = Args::parse();
     
+    // ACP 模式下使用标准数据路径的日志配置
+    let (log_config_path, _log_dir) = get_log_config_path(args.acp);
+    
+    // 检查配置文件是否存在
+    let config_path = std::path::Path::new(&log_config_path);
+    if !config_path.exists() {
+        create_default_log4rs_config(args.acp)?;
+    }
+    
+    log4rs::init_file(&log_config_path, Default::default()).unwrap();
     // 根据 ACP 模式决定如何加载配置
+    info!("{:?}", args);
     let config = if args.acp {
         config::Config::local_with_acp_mode(true).unwrap()
     } else {
         config::Config::local().unwrap()
     };
+
+    mcp::init().await;
     
     for env in config.envs {
         unsafe {

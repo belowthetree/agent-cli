@@ -144,7 +144,7 @@ pub struct Config {
 }
 
 impl Config {
-    fn get_config_dir() -> PathBuf {
+    fn get_standard_config_dir() -> PathBuf {
         // 获取标准应用配置目录
         #[cfg(target_os = "windows")]
         {
@@ -174,14 +174,14 @@ impl Config {
         PathBuf::from(".")
     }
     
-    fn get_config_paths() -> (PathBuf, PathBuf) {
+    fn get_config_paths(acp: bool) -> (PathBuf, PathBuf) {
         // 返回两个路径：(检查路径, 创建路径)
-        let config_dir = Self::get_config_dir();
+        let config_dir = Self::get_standard_config_dir();
         let local_config = PathBuf::from("config.json");
         let app_config = config_dir.join("config.json");
         
         // 优先检查当前目录的配置
-        if local_config.exists() {
+        if !acp && local_config.exists() {
             (local_config, app_config)
         } else {
             (app_config.clone(), app_config)
@@ -193,10 +193,11 @@ impl Config {
     }
 
     pub fn local_with_acp_mode(is_acp_mode: bool) -> Result<Self, Box<dyn std::error::Error>> {
-        let (config_path, create_path) = Self::get_config_paths();
+        let (config_path, create_path) = Self::get_config_paths(is_acp_mode);
         
         // 检查配置文件是否存在
         if !config_path.exists() {
+            info!("创建配置 {}", is_acp_mode);
             if is_acp_mode {
                 // ACP 模式：从标准应用配置路径创建默认配置（不询问用户）
                 return Self::create_default_config_for_acp(&create_path);

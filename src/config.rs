@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 // use crate::mcp_adaptor::McpManager;
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -143,25 +144,93 @@ pub struct Config {
 }
 
 impl Config {
+    fn get_config_dir() -> PathBuf {
+        // 获取标准应用配置目录
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(roaming) = std::env::var_os("APPDATA") {
+                let path = PathBuf::from(roaming).join("agent-cli");
+                return path;
+            }
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(home) = std::env::var_os("HOME") {
+                let path = PathBuf::from(home).join("Library").join("Application Support").join("agent-cli");
+                return path;
+            }
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(home) = std::env::var_os("HOME") {
+                let path = PathBuf::from(home).join(".config").join("agent-cli");
+                return path;
+            }
+        }
+        
+        // 如果无法获取标准路径，回退到当前目录
+        PathBuf::from(".")
+    }
+    
+    fn get_config_paths() -> (PathBuf, PathBuf) {
+        // 返回两个路径：(检查路径, 创建路径)
+        let config_dir = Self::get_config_dir();
+        let local_config = PathBuf::from("config.json");
+        let app_config = config_dir.join("config.json");
+        
+        // 优先检查当前目录的配置
+        if local_config.exists() {
+            (local_config, app_config)
+        } else {
+            (app_config.clone(), app_config)
+        }
+    }
+    
     pub fn local() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::local_with_acp_mode(false)
+    }
+
+    pub fn local_with_acp_mode(is_acp_mode: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        let (config_path, create_path) = Self::get_config_paths();
+        
         // 检查配置文件是否存在
-        if !std::path::Path::new("config.json").exists() {
-            println!("配置文件不存在，正在创建默认配置文件...");
-            return Self::create_default_config();
+        if !config_path.exists() {
+            if is_acp_mode {
+                // ACP 模式：从标准应用配置路径创建默认配置（不询问用户）
+                return Self::create_default_config_for_acp(&create_path);
+            } else {
+                println!("配置文件不存在，正在创建默认配置文件...");
+                return Self::create_default_config(&create_path);
+            }
         }
         
         // 读取配置文件
-        let config_content = fs::read_to_string("config.json")?;
+        let config_content = fs::read_to_string(&config_path)?;
         let mut config_file: Self = serde_json::from_str(&config_content)?;
         
         // 验证和补全配置字段
-        config_file = Self::validate_and_complete_config(config_file)?;
+        if is_acp_mode {
+            // ACP 模式：不询问用户，直接使用默认值补全缺失配置
+            config_file = Self::complete_config_with_defaults(config_file);
+        } else {
+            config_file = Self::validate_and_complete_config(config_file, &create_path)?;
+        }
         
         Ok(config_file)
     }
     
-    fn create_default_config() -> Result<Self, Box<dyn std::error::Error>> {
+    fn create_default_config(config_path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         info!("=== 配置文件初始化 ===");
+        
+        // 确保配置目录存在
+        if let Some(parent) = config_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+                println!("配置目录已创建: {}", parent.display());
+            }
+        }
         
         // 获取必要的配置信息
         let api_key = Self::prompt_user_input("请输入API密钥（必填）: ")?;
@@ -186,13 +255,67 @@ impl Config {
         
         // 保存配置文件
         let config_json = serde_json::to_string_pretty(&config)?;
-        fs::write("config.json", config_json)?;
+        fs::write(config_path, config_json)?;
         
-        println!("配置文件已创建: config.json");
+        println!("配置文件已创建: {}", config_path.display());
         Ok(config)
     }
+
+    /// 为 ACP 模式创建默认配置（不询问用户）
+    fn create_default_config_for_acp(config_path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        info!("=== ACP 模式：创建默认配置文件 ===");
+        
+        // 确保配置目录存在
+        if let Some(parent) = config_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+                info!("配置目录已创建: {}", parent.display());
+            }
+        }
+        
+        // 创建默认配置（使用空字符串作为占位符）
+        let config = Config {
+            mcp: None,
+            api_key: String::new(), // 空字符串，需要由客户端提供
+            url: None,
+            model: None,
+            max_tool_try: max_tool_try_default(),
+            max_context_num: max_context_num_default(),
+            max_tokens: max_tokens_default(),
+            ask_before_tool_execution: ask_before_tool_execution_default(),
+            auto_compress_threshold: auto_compress_threshold_default(),
+            compress_trigger_ratio: compress_trigger_ratio_default(),
+            prompt: None,
+            envs: Vec::new(),
+        };
+        
+        // 保存配置文件
+        let config_json = serde_json::to_string_pretty(&config)?;
+        fs::write(config_path, config_json)?;
+        
+        info!("配置文件已创建: {}", config_path.display());
+        Ok(config)
+    }
+
+    /// 使用默认值补全配置（不询问用户）
+    fn complete_config_with_defaults(mut config: Self) -> Self {
+        // 设置默认值
+        if config.max_tool_try == 0 {
+            config.max_tool_try = max_tool_try_default();
+        }
+        
+        if config.max_context_num == 0 {
+            config.max_context_num = max_context_num_default();
+        }
+        
+        if config.max_tokens.is_none() {
+            config.max_tokens = max_tokens_default();
+        }
+        
+        config
+    }
     
-    fn validate_and_complete_config(mut config: Self) -> Result<Self, Box<dyn std::error::Error>> {
+    fn validate_and_complete_config(mut config: Self, config_path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let mut needs_save = false;
         
         // 验证必填字段
@@ -221,8 +344,8 @@ impl Config {
         // 如果需要保存，更新配置文件
         if needs_save {
             let config_json = serde_json::to_string_pretty(&config)?;
-            fs::write("config.json", config_json)?;
-            println!("配置文件已更新");
+            fs::write(config_path, config_json)?;
+            println!("配置文件已更新: {}", config_path.display());
         }
         
         Ok(config)

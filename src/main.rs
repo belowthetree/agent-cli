@@ -79,13 +79,20 @@ async fn main() -> anyhow::Result<()> {
     }
     log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
     mcp::init().await;
-    let config = config::Config::local().unwrap();
+    let args = Args::parse();
+    
+    // 根据 ACP 模式决定如何加载配置
+    let config = if args.acp {
+        config::Config::local_with_acp_mode(true).unwrap()
+    } else {
+        config::Config::local().unwrap()
+    };
+    
     for env in config.envs {
         unsafe {
             std::env::set_var(env.key, env.value);
         }
     }
-    let args = Args::parse();
     
     // 优先处理 remote 模式
     if let Some(addr) = args.remote {

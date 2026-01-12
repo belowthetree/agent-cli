@@ -136,10 +136,6 @@ impl Chat {
         self.state.get_state() == EChatState::Running
     }
 
-    pub fn run(&mut self) {
-        self.state.set_state(EChatState::Running);
-    }
-
     /// 获取取消令牌的副本，用于在流处理期间取消聊天
     pub fn get_cancel_token(&self) -> tokio_util::sync::CancellationToken {
         self.state.get_cancel_token()

@@ -14,6 +14,33 @@ pub use chat_state::EChatState;
 pub use chat_state::ChatState;
 pub use chat_stream::StreamedChatResponse;
 
+/// # Chat
+/// 与模型对话的基础结构
+/// 推荐使用 stream_chat
+/// ```rust
+/// let mut chat = Chat::new();
+/// let stream = chat.stream_chat("hello");
+/// pin_mut!(stream);
+/// while let Some(result) = stream.next().await {
+///     match result {
+///         Ok(res) => {
+///             match res {
+///                 StreamedChatResponse::Text(text) => print!("{}", text),
+///                 StreamedChatResponse::ToolCall(tool_call) => print!("{:?}", tool_call),
+///                 StreamedChatResponse::Reasoning(think) => print!("{}", think),
+///                 StreamedChatResponse::ToolResponse(tool) => print!("{:?}", tool),
+///                 _ => {}
+///             }
+///             // 改进错误处理：使用?操作符而不是unwrap()
+///             io::stdout().flush()?;
+///        }
+///        Err(e) => {
+///             // 记录错误但不中断处理
+///             eprintln!("处理流式响应时出错: {}", e);
+///         }
+///     }
+/// }
+/// ```
 #[derive(Clone)]
 pub struct Chat {
     state: ChatState,

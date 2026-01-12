@@ -14,10 +14,8 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use uuid::Uuid;
 
 use crate::chat::Chat;
-use crate::chat::chat_stream::ChatStream;
 use crate::config::Config;
 use crate::mcp::get_config_tools;
-use crate::model::param::ModelMessage;
 
 /// 会话数据
 #[derive(Clone)]
@@ -103,11 +101,8 @@ impl AcpAgent {
         let session = sessions.get_mut(session_id_ref)
             .ok_or_else(|| acp::Error::invalid_params())?;
 
-        // 添加用户消息到聊天上下文
-        session.chat.add_message(ModelMessage::user(full_prompt.clone()));
-
         // 使用流式处理
-        let stream = ChatStream::handle_rechat(&mut session.chat);
+        let stream = session.chat.stream_chat(&full_prompt);
         pin_mut!(stream);
 
         // 处理流式响应
@@ -232,11 +227,15 @@ impl acp::Agent for AcpAgent {
 
     async fn authenticate(&self, _request: acp::AuthenticateRequest) -> acp::Result<acp::AuthenticateResponse> {
         warn!("authenticate 暂不支持");
-        Err(acp::Error::method_not_found())
+        Ok(acp::AuthenticateResponse::new())
     }
 
     async fn cancel(&self, _request: acp::CancelNotification) -> acp::Result<()> {
         warn!("cancel 暂不支持");
+        // let mut sess = self.sessions.get_mut();
+        // if sess.contains_key(&request.session_id) {
+        //     // sess.get_mut(&request.session_id).unwrap().chat.
+        // }
         Err(acp::Error::method_not_found())
     }
 }

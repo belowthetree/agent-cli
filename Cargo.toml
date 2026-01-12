@@ -40,3 +40,5 @@ chrono = "0.4.38"
 tokio-tungstenite = "0.21"
 tungstenite = "0.21"
 eventsource-client = "0.16.0"
+agent-client-protocol = "0.9.3"
+uuid = { version = "1.0", features = ["v4", "serde"] }

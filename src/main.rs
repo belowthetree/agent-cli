@@ -12,6 +12,7 @@ mod napcat;
 mod prompt;
 mod tui;
 mod remote;
+mod acp;
 
 /// 创建默认的log4rs配置文件
 fn create_default_log4rs_config() -> anyhow::Result<()> {

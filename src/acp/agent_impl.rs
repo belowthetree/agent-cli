@@ -2,11 +2,12 @@
 //! 
 //! 实现 Agent trait，将 agent-cli 的功能暴露为 ACP 服务
 
-use agent_client_protocol::{self as acp, Client, ContentBlock, TextContent};
+use agent_client_protocol::{self as acp, Client, TextContent};
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use log::{info, error, warn, debug};
 use serde_json::json;
+use tokio_util::sync::CancellationToken;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,7 +29,6 @@ struct SessionData {
     id: acp::SessionId,
     cwd: PathBuf,
     chat: Chat,
-    current_prompt: Arc<RwLock<Option<String>>>,
 }
 
 /// ACP Agent 实现
@@ -37,6 +37,7 @@ pub struct AcpAgent {
     session_update_tx: SessionUpdateSender,
     config: Config,
     agent_info: acp::Implementation,
+    cancels: Arc<RwLock<HashMap<acp::SessionId, CancellationToken>>>,
 }
 
 impl AcpAgent {
@@ -53,6 +54,7 @@ impl AcpAgent {
             config,
             agent_info: acp::Implementation::new(server_name, server_version)
                 .title(Some("Agent CLI".to_string())),
+            cancels: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -90,26 +92,13 @@ impl AcpAgent {
 
         info!("处理提示 - 会话: {:?}, 内容长度: {}", session_id, full_prompt.len());
 
-        // 发送用户消息更新
-        let _ = self.send_session_update(
-            session_id.clone(),
-            acp::SessionUpdate::UserMessageChunk(
-                acp::ContentChunk::new(ContentBlock::Text(TextContent::new(full_prompt.clone())))
-            ),
-        ).await;
-
-        // 保存当前提示
-        {
-            let sessions = self.sessions.read().await;
-            if let Some(session) = sessions.get(&session_id) {
-                *session.current_prompt.write().await = Some(full_prompt.clone());
-            }
-        }
-
         // 获取会话并处理流式响应
         let mut sessions = self.sessions.write().await;
         let session = sessions.get_mut(&session_id)
             .ok_or_else(|| acp::Error::invalid_params())?;
+        {
+            self.cancels.write().await.insert(session.id.clone(), session.chat.get_cancel_token());
+        }
 
         // 使用流式处理
         let stream = session.chat.stream_chat(&full_prompt);
@@ -206,7 +195,7 @@ impl AcpAgent {
 #[async_trait(?Send)]
 impl acp::Agent for AcpAgent {
     async fn initialize(&self, _request: acp::InitializeRequest) -> acp::Result<acp::InitializeResponse> {
-        info!("初始化 ACP 连接");
+        info!("初始化 ACP 连接 {:?}", _request);
 
         Ok(acp::InitializeResponse::new(acp::ProtocolVersion::V1)
             .agent_info(self.agent_info.clone())
@@ -230,7 +219,6 @@ impl acp::Agent for AcpAgent {
             id: session_id.clone(),
             cwd: cwd.clone(),
             chat,
-            current_prompt: Arc::new(RwLock::new(None)),
         };
 
         self.sessions.write().await.insert(session_id.clone(), session_data);
@@ -252,14 +240,13 @@ impl acp::Agent for AcpAgent {
 
     async fn cancel(&self, request: acp::CancelNotification) -> acp::Result<()> {
         info!("收到取消请求 - 会话: {:?}", request.session_id);
-        
-        // TODO: 实现取消逻辑
-        // let sessions = self.sessions.read().await;
-        // if let Some(session) = sessions.get(&request.session_id) {
-        //     // 取消正在进行的操作
-        // }
-        
-        Ok(())
+        if let Some(token) = self.cancels.read().await.get(&request.session_id) {
+            token.cancel();
+            Ok(())
+        } else {
+            warn!("取消失败，会话不存在");
+            Err(acp::Error::internal_error())
+        }
     }
 
     async fn set_session_mode(&self, request: acp::SetSessionModeRequest) -> acp::Result<acp::SetSessionModeResponse> {

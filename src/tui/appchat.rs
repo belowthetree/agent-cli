@@ -46,9 +46,6 @@ impl AppChat {
         }
 
         let mut chat = { selfchat.lock().unwrap().clone() };
-        {
-            selfchat.lock().unwrap().run();
-        }
         let stream = chat.stream_rechat();
         // 发送初始滚动信号
         send_event(&tx, ETuiEvent::ScrollToBottom);
@@ -132,9 +129,6 @@ impl AppChat {
         if guard.get_state() != EChatState::Idle {
             info!("正忙碌");
             return;
-        }
-        {
-            selfchat.lock().unwrap().run();
         }
         let stream = guard.stream_rechat();
         send_event(&tx, ETuiEvent::ScrollToBottom);

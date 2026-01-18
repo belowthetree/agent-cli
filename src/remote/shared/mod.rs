@@ -3,14 +3,16 @@
 use crate::chat::Chat;
 use crate::chat::EChatState;
 use crate::chat::StreamedChatResponse;
-use crate::remote::protocol::{RemoteResponse, ResponseContent, TokenUsage, RemoteRequest, InputType};
+use crate::remote::protocol::{
+    InputType, RemoteRequest, RemoteResponse, ResponseContent, TokenUsage,
+};
+use anyhow::Result;
 use futures::{SinkExt, StreamExt};
-use log::{info, warn, error};
-use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
+use log::{error, info, warn};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use anyhow::Result;
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 
 /// 处理流式聊天响应的共享函数
 pub async fn process_streaming_chat_with_ws(
@@ -21,19 +23,19 @@ pub async fn process_streaming_chat_with_ws(
 ) -> Result<RemoteResponse> {
     let mut tool_errors = Vec::new();
     let cancel_token = chat.get_cancel_token();
-    
+
     // 创建一个通道来接收聊天流的结果
     let (tx, mut rx) = mpsc::channel::<Result<StreamedChatResponse, anyhow::Error>>(32);
 
     let input_clone = input.to_string();
     let mut chat_clone = chat.clone();
-    
+
     // 创建一个单独的任务来处理聊天流
     let chat_task = tokio::spawn(async move {
         {
             let stream = chat_clone.stream_chat(&input_clone);
             futures::pin_mut!(stream);
-            
+
             while let Some(result) = stream.next().await {
                 // 发送结果到通道
                 if tx.send(result).await.is_err() {
@@ -45,11 +47,11 @@ pub async fn process_streaming_chat_with_ws(
         info!("聊天流任务完成");
         chat_clone
     });
-    
+
     // 使用 tokio::select! 同时监听聊天流结果和 WebSocket 消息
     let mut chat_task_completed = false;
     let mut interrupted = false;
-    
+
     loop {
         tokio::select! {
             // 从通道接收聊天流结果
@@ -118,7 +120,7 @@ pub async fn process_streaming_chat_with_ws(
                                 // 尝试将二进制数据解析为 JSON 字符串
                                 if let Ok(text) = String::from_utf8(data) {
                                     info!("Received binary WebSocket message during streaming chat processing: {}", text);
-                                    
+
                                     if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
                                         if let InputType::Interrupt = &request.input {
                                             // 收到 interrupt，但不立即取消聊天流
@@ -162,25 +164,25 @@ pub async fn process_streaming_chat_with_ws(
                 }
             }
         }
-        
+
         // 如果聊天任务已完成，退出循环
         if chat_task_completed {
             break;
         }
     }
-    
+
     // 等待聊天任务完成（如果还没有完成）
     let returned_chat = if !chat_task_completed {
         chat_task.await.ok()
     } else {
         None
     };
-    
+
     // 如果任务返回了修改后的 chat_clone，将其赋值回原始 chat
     if let Some(returned_chat) = returned_chat {
         *chat = returned_chat;
     }
-    
+
     // 发送工具确认协议
     if chat.get_state() == EChatState::WaitingToolConfirm {
         // Get the last tool call from context
@@ -188,15 +190,16 @@ pub async fn process_streaming_chat_with_ws(
             if let Some(tool_calls) = &last_msg.tool_calls {
                 if let Some(tool_call) = tool_calls.first() {
                     // Parse arguments string to JSON value
-                    let arguments: serde_json::Value = match serde_json::from_str(&tool_call.function.arguments) {
-                        Ok(args) => args,
-                        Err(e) => {
-                            // If parsing fails, create an empty object
-                            warn!("Failed to parse tool arguments as JSON: {}", e);
-                            serde_json::json!({})
-                        }
-                    };
-                    
+                    let arguments: serde_json::Value =
+                        match serde_json::from_str(&tool_call.function.arguments) {
+                            Ok(args) => args,
+                            Err(e) => {
+                                // If parsing fails, create an empty object
+                                warn!("Failed to parse tool arguments as JSON: {}", e);
+                                serde_json::json!({})
+                            }
+                        };
+
                     // Return a tool confirmation request
                     return Ok(RemoteResponse {
                         request_id: String::new(), // Will be replaced by caller
@@ -212,25 +215,31 @@ pub async fn process_streaming_chat_with_ws(
             }
         }
     }
-    
+
     // 发送对话轮次确认协议
     if chat.get_state() == EChatState::WaitingTurnConfirm {
         let (current_turns, max_turns) = chat.get_conversation_turn_info();
-        info!("发送对话轮次确认请求: 当前轮次={}, 最大轮次={}", current_turns, max_turns);
-        
+        info!(
+            "发送对话轮次确认请求: 当前轮次={}, 最大轮次={}",
+            current_turns, max_turns
+        );
+
         // Return a turn confirmation request
         return Ok(RemoteResponse {
             request_id: String::new(), // Will be replaced by caller
             response: ResponseContent::TurnConfirmationRequest {
                 current_turns,
                 max_turns,
-                reason: Some(format!("已达到最大对话轮次限制 ({} 轮)。是否重置对话轮次以继续对话？", max_turns)),
+                reason: Some(format!(
+                    "已达到最大对话轮次限制 ({} 轮)。是否重置对话轮次以继续对话？",
+                    max_turns
+                )),
             },
             error: None,
             token_usage: None,
         });
     }
-    
+
     // token 使用情况
     let token_usage = chat.context().last().and_then(|last_msg| {
         last_msg.token_usage.as_ref().map(|usage| TokenUsage {
@@ -239,7 +248,7 @@ pub async fn process_streaming_chat_with_ws(
             total_tokens: usage.total_tokens,
         })
     });
-    
+
     // If there are tool errors, return a tool error response
     if !tool_errors.is_empty() {
         // For now, return the first tool error

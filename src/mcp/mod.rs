@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 use crate::{
     config,
-    mcp::internalserver::{InternalTool, filesystem::FileSystemTool, shell_command::ShellCommandTool},
+    mcp::internalserver::{
+        InternalTool, filesystem::FileSystemTool, shell_command::ShellCommandTool,
+    },
 };
 
 pub async fn init() {
@@ -41,9 +43,11 @@ pub async fn init() {
 
 #[allow(unused)]
 pub fn get_basic_tools() -> Vec<McpTool> {
-    vec![
-        McpTool::new(FileSystemTool.get_mcp_tool(), "".into(), false),
-    ]
+    vec![McpTool::new(
+        FileSystemTool.get_mcp_tool(),
+        "".into(),
+        false,
+    )]
 }
 
 pub fn get_config_tools() -> Vec<McpTool> {

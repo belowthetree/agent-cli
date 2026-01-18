@@ -1,10 +1,10 @@
 //! 基础处理器 trait
 
-use crate::remote::protocol::{RemoteRequest, RemoteResponse};
-use crate::config::Config;
 use crate::chat::Chat;
-use tokio_tungstenite::WebSocketStream;
+use crate::config::Config;
+use crate::remote::protocol::{RemoteRequest, RemoteResponse};
 use tokio::net::TcpStream;
+use tokio_tungstenite::WebSocketStream;
 
 /// 请求处理器 trait
 #[async_trait::async_trait]
@@ -17,7 +17,7 @@ pub trait RequestHandler: Send + Sync {
         config: &Config,
         ws_stream: &mut WebSocketStream<TcpStream>,
     ) -> RemoteResponse;
-    
+
     /// 检查此处理器是否可以处理给定的请求
     #[allow(unused)]
     fn can_handle(&self, request: &RemoteRequest) -> bool;

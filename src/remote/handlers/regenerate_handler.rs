@@ -1,13 +1,13 @@
 //! 处理 Regenerate 请求的处理器
 
 use super::base_handler::RequestHandler;
-use crate::remote::protocol::{RemoteRequest, RemoteResponse};
-use crate::config::Config;
 use crate::chat::Chat;
-use tokio_tungstenite::WebSocketStream;
-use tokio::net::TcpStream;
-use log::info;
+use crate::config::Config;
+use crate::remote::protocol::{RemoteRequest, RemoteResponse};
 use futures::StreamExt;
+use log::info;
+use tokio::net::TcpStream;
+use tokio_tungstenite::WebSocketStream;
 
 /// 处理 Regenerate 请求的处理器
 pub struct RegenerateHandler;
@@ -26,11 +26,11 @@ impl RequestHandler for RegenerateHandler {
         if !chat.is_running() {
             // 使用 stream_rechat 重新生成回复
             let mut response_chunks = Vec::new();
-            
+
             {
                 let stream = chat.stream_rechat();
                 futures::pin_mut!(stream);
-                
+
                 while let Some(result) = stream.next().await {
                     match result {
                         Ok(response) => {
@@ -45,11 +45,15 @@ impl RequestHandler for RegenerateHandler {
                                     }
                                 }
                                 StreamedChatResponse::ToolCall(tool_call) => {
-                                    response_chunks.push(format!("[Tool call: {}]", tool_call.function.name));
+                                    response_chunks
+                                        .push(format!("[Tool call: {}]", tool_call.function.name));
                                 }
                                 StreamedChatResponse::ToolResponse(tool_response) => {
                                     if !tool_response.content.is_empty() {
-                                        response_chunks.push(format!("[Tool result: {}]", tool_response.content));
+                                        response_chunks.push(format!(
+                                            "[Tool result: {}]",
+                                            tool_response.content
+                                        ));
                                     }
                                 }
                                 StreamedChatResponse::TokenUsage(usage) => {
@@ -61,7 +65,10 @@ impl RequestHandler for RegenerateHandler {
                             }
                         }
                         Err(e) => {
-                            return RemoteResponse::error(&request.request_id, &format!("Regeneration error: {}", e));
+                            return RemoteResponse::error(
+                                &request.request_id,
+                                &format!("Regeneration error: {}", e),
+                            );
                         }
                     }
                 }
@@ -77,11 +84,17 @@ impl RequestHandler for RegenerateHandler {
                 token_usage: None,
             }
         } else {
-            RemoteResponse::error(&request.request_id, "Cannot regenerate while model is running")
+            RemoteResponse::error(
+                &request.request_id,
+                "Cannot regenerate while model is running",
+            )
         }
     }
-    
+
     fn can_handle(&self, request: &RemoteRequest) -> bool {
-        matches!(&request.input, crate::remote::protocol::InputType::Regenerate)
+        matches!(
+            &request.input,
+            crate::remote::protocol::InputType::Regenerate
+        )
     }
 }

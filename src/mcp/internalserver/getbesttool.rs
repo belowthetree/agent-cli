@@ -1,11 +1,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use log::info;
 use rmcp::model::{Annotated, RawContent, RawTextContent};
 
-use crate::{chat::Chat, config, mcp::{internalserver::{choosetool::ChooseTool, InternalTool}, McpManager, McpTool}};
+use crate::{
+    chat::Chat,
+    config,
+    mcp::{
+        McpManager, McpTool,
+        internalserver::{InternalTool, choosetool::ChooseTool},
+    },
+};
 
 #[allow(unused)]
 #[derive(Debug)]
@@ -15,7 +22,10 @@ const PROMPT: &'static str = "你是一个工具查询系统，请根据用户�
 
 #[async_trait]
 impl InternalTool for GetBestTool {
-    async fn call(&self, args: serde_json::Map<String, serde_json::Value>)->anyhow::Result<rmcp::model::CallToolResult> {
+    async fn call(
+        &self,
+        args: serde_json::Map<String, serde_json::Value>,
+    ) -> anyhow::Result<rmcp::model::CallToolResult> {
         if !args.contains_key("tool_description") {
             return Err(anyhow::anyhow!("GetBestToo 缺少参数 tool_description"));
         }
@@ -31,8 +41,7 @@ impl InternalTool for GetBestTool {
         // 把“选择工具”的接口传给 mcp_manager 和对话器
         let tool = ChooseTool.get_mcp_tool();
         McpManager::global().add_internal_tool(Arc::new(ChooseTool))?;
-        let mut chat = Chat::new(config)
-        .tools(vec![McpTool::new(tool.clone(), "".into(), false)]);
+        let mut chat = Chat::new(config).tools(vec![McpTool::new(tool.clone(), "".into(), false)]);
         // 开始获取结果
         let stream = chat.chat(prompt);
         pin_mut!(stream);
@@ -43,8 +52,8 @@ impl InternalTool for GetBestTool {
                     crate::chat::StreamedChatResponse::Text(text) => {
                         result = text;
                         break;
-                    },
-                    _ => {},
+                    }
+                    _ => {}
                 }
             }
         }
@@ -52,7 +61,10 @@ impl InternalTool for GetBestTool {
         McpManager::global().remove_tool(&tool.name)?;
         info!("获取最佳工具：{:?}", result);
         let mut res = Vec::new();
-        res.push(Annotated::new(RawContent::Text(RawTextContent { text: result }), None));
+        res.push(Annotated::new(
+            RawContent::Text(RawTextContent { text: result }),
+            None,
+        ));
         Ok(rmcp::model::CallToolResult {
             content: res,
             structured_content: None,
@@ -60,12 +72,12 @@ impl InternalTool for GetBestTool {
         })
     }
 
-    fn get_mcp_tool(&self)->rmcp::model::Tool {
-        rmcp::model::Tool{
+    fn get_mcp_tool(&self) -> rmcp::model::Tool {
+        rmcp::model::Tool {
             name: "get_best_tool".into(),
             description: Some(std::borrow::Cow::Borrowed("获取你最需要的工具信息")),
             input_schema: serde_json::from_str(
-r#"
+                r#"
 {
     "properties":{
         "tool_description":{
@@ -73,9 +85,12 @@ r#"
             "type": "string"
         }
     }
-}"#).unwrap(),
-            output_schema: Some(serde_json::from_str(
-r#"
+}"#,
+            )
+            .unwrap(),
+            output_schema: Some(
+                serde_json::from_str(
+                    r#"
 {
     "properties":{
         "tools":{
@@ -86,12 +101,15 @@ r#"
             }
         }
     }
-}"#).unwrap()),
+}"#,
+                )
+                .unwrap(),
+            ),
             annotations: None,
         }
     }
 
-    fn name(&self)->String {
+    fn name(&self) -> String {
         "get_best_tool".into()
     }
 }

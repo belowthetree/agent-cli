@@ -1,12 +1,15 @@
+use eventsource_client::{Client, ClientBuilder, SSE};
 use futures::Stream;
 use log::{error, info, warn};
 use reqwest::header;
 use serde_json::Value;
 use std::sync::OnceLock;
-use eventsource_client::{Client, ClientBuilder, SSE};
 use tokio_stream::StreamExt;
 
-use crate::{connection::{CommonConnectionContent, TokenUsage}, model::param::ToolCall};
+use crate::{
+    connection::{CommonConnectionContent, TokenUsage},
+    model::param::ToolCall,
+};
 
 /// 全局 HTTP 客户端，支持连接池
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -24,18 +27,22 @@ fn get_http_client() -> &'static reqwest::Client {
 pub struct SseConnection;
 
 impl SseConnection {
-    pub fn stream(url: String, key: String, body: String) -> impl Stream<Item = std::result::Result<CommonConnectionContent, anyhow::Error>> {
+    pub fn stream(
+        url: String,
+        key: String,
+        body: String,
+    ) -> impl Stream<Item = std::result::Result<CommonConnectionContent, anyhow::Error>> {
         let _client = get_http_client();
         let url_clone = url.clone();
         let key_clone = key.clone();
         let body_clone = body.clone();
-        
+
         async_stream::stream! {
             // 使用 eventsource_client 解析 SSE 流
             let mut tool_calls = Vec::new();
-            
+
             info!("开始流式处理");
-            
+
             // 创建 eventsource 客户端构建器
             let client_builder = match ClientBuilder::for_url(&url_clone) {
                 Ok(builder) => builder,
@@ -44,7 +51,7 @@ impl SseConnection {
                     return;
                 }
             };
-            
+
             // 配置客户端 - 第一个 header
             let client_builder = match client_builder.header("Content-Type", "application/json") {
                 Ok(builder) => builder,
@@ -53,7 +60,7 @@ impl SseConnection {
                     return;
                 }
             };
-            
+
             // 配置客户端 - 第二个 header
             let client_builder = match client_builder.header("Authorization", &key_clone) {
                 Ok(builder) => builder,
@@ -62,21 +69,21 @@ impl SseConnection {
                     return;
                 }
             };
-            
+
             // 设置 HTTP 方法为 POST
             let client_builder = client_builder.method("POST".to_string());
-            
+
             // 构建客户端
             let client = client_builder.body(body_clone.clone()).build();
-            
+
             let mut stream = client.stream();
-            
+
             while let Some(event) = stream.next().await {
                 match event {
                     Ok(SSE::Event(evt)) => {
                         if evt.event_type == "message" || evt.event_type.is_empty() {
                             let data = evt.data;
-                            
+
                             // 处理结束标志
                             if data == "[DONE]" {
                                 for tool in tool_calls {
@@ -84,7 +91,7 @@ impl SseConnection {
                                 }
                                 return;
                             }
-                            
+
                             let json = match serde_json::from_str::<Value>(&data) {
                                 Ok(json) => json,
                                 Err(e) => {
@@ -92,14 +99,14 @@ impl SseConnection {
                                     continue;
                                 }
                             };
-                            
+
                             // 检查是否有 usage 字段（流式响应中通常只在最后发送）
                             if let Some(usage) = json.get("usage") {
                                 if let Ok(token_usage) = serde_json::from_value::<TokenUsage>(usage.clone()) {
                                     yield Ok(CommonConnectionContent::TokenUsage(token_usage));
                                 }
                             }
-                            
+
                             // 获取内容
                             let choices = json.get("choices");
                             if choices.is_none() {
@@ -116,7 +123,7 @@ impl SseConnection {
                                         break;
                                     }
                                 }
-                                
+
                                 let message;
                                 if let Some(t) = choice.get("message") {
                                     message = t.clone();
@@ -129,21 +136,21 @@ impl SseConnection {
                                     }
                                     return;
                                 }
-                                
+
                                 // 处理对话内容
                                 if let Some(ctx) = message.get("content") {
                                     if let Some(text_str) = ctx.as_str() {
                                         yield Ok(CommonConnectionContent::Content(text_str.to_string()));
                                     }
                                 }
-                                
+
                                 // 处理思考
                                 if let Some(ctx) = message.get("reasoning_content") {
                                     if let Some(text_str) = ctx.as_str() {
                                         yield Ok(CommonConnectionContent::Reasoning(text_str.to_string()));
                                     }
                                 }
-                                
+
                                 // 处理工具调用，由于是字段增量的形式接受，等完全接收后再返回
                                 if let Some(ctx) = message.get("tool_calls") {
                                     if let Some(arr) = ctx.as_array() {
@@ -155,12 +162,12 @@ impl SseConnection {
                                                     continue;
                                                 }
                                             };
-                                                
+
                                             if tool_calls.len() <= tool.index {
                                                 tool_calls.insert(tool.index, tool);
                                                 continue;
                                             }
-                                            
+
                                             let t = tool_calls.get_mut(tool.index).unwrap();
                                             t.id += &tool.id;
                                             t.r#type += &tool.r#type;
@@ -185,7 +192,7 @@ impl SseConnection {
                     }
                 }
             }
-            
+
             for tool in tool_calls {
                 yield Ok(CommonConnectionContent::ToolCall(tool));
             }
@@ -196,7 +203,11 @@ impl SseConnection {
 pub struct DirectConnection;
 
 impl DirectConnection {
-    pub async fn request(url: String, key: String, body: String) -> std::result::Result<Vec<CommonConnectionContent>, anyhow::Error> {
+    pub async fn request(
+        url: String,
+        key: String,
+        body: String,
+    ) -> std::result::Result<Vec<CommonConnectionContent>, anyhow::Error> {
         info!("请求 {}", url);
         let client = get_http_client();
         let response = match client
@@ -225,14 +236,14 @@ impl DirectConnection {
             Ok(text) => text,
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
-        
+
         let json: Value = match serde_json::from_str(&text) {
             Ok(json) => json,
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
 
         let mut res = Vec::new();
-        
+
         if let Some(choices) = json.get("choices") {
             if let Some(first_choice) = choices.get(0) {
                 if let Some(message) = first_choice.get("message") {
@@ -257,7 +268,7 @@ impl DirectConnection {
                         .map(|s| s.to_string());
 
                     let _ = first_choice.get("index").and_then(Value::as_u64);
-                    
+
                     res.push(CommonConnectionContent::Content(content));
                     if let Some(tools) = tool_calls {
                         for tool in tools.iter() {
@@ -270,14 +281,15 @@ impl DirectConnection {
                     if let Some(finish) = finish_reason {
                         res.push(CommonConnectionContent::FinishReason(finish));
                     }
-                    
+
                     // 解析 token 使用情况
                     if let Some(usage) = json.get("usage") {
-                        if let Ok(token_usage) = serde_json::from_value::<TokenUsage>(usage.clone()) {
+                        if let Ok(token_usage) = serde_json::from_value::<TokenUsage>(usage.clone())
+                        {
                             res.push(CommonConnectionContent::TokenUsage(token_usage));
                         }
                     }
-                    
+
                     return Ok(res);
                 }
             }

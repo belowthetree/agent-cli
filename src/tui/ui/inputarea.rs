@@ -1,7 +1,10 @@
-use std::char;
-use log::{debug, info};
-use ratatui::{widgets::{Block, Borders, Paragraph, Widget, Wrap}, style::Stylize};
 use crate::tui::{get_char_width, ui::command_suggestions::CommandSuggestions};
+use log::{debug, info};
+use ratatui::{
+    style::Stylize,
+    widgets::{Block, Borders, Paragraph, Widget, Wrap},
+};
+use std::char;
 
 #[derive(Clone)]
 pub struct InputArea {
@@ -27,7 +30,7 @@ impl InputArea {
     }
 
     // 退格，返回退格的字符宽度
-    pub fn backspace(&mut self, width: u16)->u16 {
+    pub fn backspace(&mut self, width: u16) -> u16 {
         if self.content.len() <= 0 {
             return 0;
         }
@@ -56,7 +59,7 @@ impl InputArea {
     //         self.max_height + suggestions_height
     //     }
     // }
-    pub fn height(&self)->u16 {
+    pub fn height(&self) -> u16 {
         self.max_height
     }
 
@@ -78,13 +81,13 @@ impl InputArea {
     /// 选择下一个命令提示
     pub fn next_suggestion(&mut self) {
         self.command_suggestions.next();
-        info!{"sugg {:?}", self.command_suggestions.selected_index};
+        info! {"sugg {:?}", self.command_suggestions.selected_index};
     }
 
     /// 选择上一个命令提示
     pub fn previous_suggestion(&mut self) {
         self.command_suggestions.previous();
-        info!{"sugg {:?}", self.command_suggestions.selected_index};
+        info! {"sugg {:?}", self.command_suggestions.selected_index};
     }
 
     /// 获取当前选中的命令
@@ -97,7 +100,7 @@ impl InputArea {
         self.command_suggestions.visible && !self.command_suggestions.commands.is_empty()
     }
 
-    pub fn get_content_width(&self)->u16 {
+    pub fn get_content_width(&self) -> u16 {
         let mut width = 0;
         for c in self.content.chars() {
             width += get_char_width(c);
@@ -106,7 +109,7 @@ impl InputArea {
     }
 
     // 获取当前宽度位置的下一个字符的宽度
-    pub fn get_width(&self, width: u16)->u16 {
+    pub fn get_width(&self, width: u16) -> u16 {
         let chars: Vec<char> = self.content.chars().collect();
         let mut width_count = 0;
         for idx in 0..chars.len() {
@@ -120,7 +123,7 @@ impl InputArea {
     }
 
     // 获取当前宽度位置的上一个字符的宽度
-    pub fn get_previous_char_width(&self, width: u16)->u16 {
+    pub fn get_previous_char_width(&self, width: u16) -> u16 {
         let chars: Vec<char> = self.content.chars().collect();
         let mut width_count = 0;
         for idx in 0..chars.len() {
@@ -133,7 +136,7 @@ impl InputArea {
         0
     }
 
-    pub fn get_index_by_width(&self, width: u16)->usize {
+    pub fn get_index_by_width(&self, width: u16) -> usize {
         let chars: Vec<char> = self.content.chars().collect();
         let mut width_count = 0;
         let mut s = String::new();
@@ -152,7 +155,8 @@ impl InputArea {
 impl Widget for &InputArea {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
-        Self: Sized {
+        Self: Sized,
+    {
         let mut area = area;
         // 首先渲染命令提示列表（如果显示）
         if self.should_show_suggestions() {
@@ -160,7 +164,7 @@ impl Widget for &InputArea {
             // 命令提示的高度取决于要显示的命令数量
             let display_count = self.command_suggestions.display_count();
             let suggestions_height = display_count as u16 + 2; // +2 用于边框
-            
+
             // 确保有足够的空间显示命令提示
             if suggestions_height > 0 && area.y >= suggestions_height {
                 let suggestions_area = ratatui::layout::Rect {
@@ -169,20 +173,20 @@ impl Widget for &InputArea {
                     width: area.width,
                     height: suggestions_height,
                 };
-                
+
                 // 渲染命令提示组件
                 let _ = &self.command_suggestions.render(suggestions_area, buf);
             }
             area.height = area.height.saturating_sub(suggestions_height);
         }
-        
+
         // 渲染输入区域
         let block = Block::default()
             .title("输入")
             .borders(Borders::ALL)
             .style(ratatui::style::Style::new().light_blue());
         let para = Paragraph::new(self.content.clone())
-            .wrap(Wrap { trim: false})
+            .wrap(Wrap { trim: false })
             .block(block)
             .style(ratatui::style::Style::new().green());
         para.render(area, buf);

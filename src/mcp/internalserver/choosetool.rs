@@ -11,7 +11,7 @@ pub struct ChooseTool;
 
 #[async_trait]
 impl InternalTool for ChooseTool {
-    async fn call(&self, args: Map<String, Value>)->anyhow::Result<CallToolResult> {
+    async fn call(&self, args: Map<String, Value>) -> anyhow::Result<CallToolResult> {
         if !args.contains_key("tools") {
             return Err(anyhow::anyhow!("choose_tool tools"));
         }
@@ -29,10 +29,12 @@ impl InternalTool for ChooseTool {
         })
     }
 
-    fn get_mcp_tool(&self)->Tool {
-        Tool{
+    fn get_mcp_tool(&self) -> Tool {
+        Tool {
             name: "choose_tool".into(),
-            description: Some("Tell system and user the most appropriate tools should be use".into()),
+            description: Some(
+                "Tell system and user the most appropriate tools should be use".into(),
+            ),
             input_schema: serde_json::from_str(
                 r#"
 {
@@ -45,13 +47,15 @@ impl InternalTool for ChooseTool {
             }
         }
     }
-}"#).unwrap(),
+}"#,
+            )
+            .unwrap(),
             output_schema: None,
             annotations: None,
         }
     }
 
-    fn name(&self)->String {
+    fn name(&self) -> String {
         "choose_tool".into()
     }
 }

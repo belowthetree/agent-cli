@@ -1,13 +1,14 @@
-use std::{
-    io,
-    sync::{mpsc},
-};
+use std::{io, sync::mpsc};
 
 use log::{error, info, warn};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use tokio_util::sync::CancellationToken;
 
-use crate::{chat::EChatState, tui::app::{App, ETuiEvent}, perf_start, perf_end};
+use crate::{
+    chat::EChatState,
+    perf_end, perf_start,
+    tui::app::{App, ETuiEvent},
+};
 
 /// 事件处理器，负责处理键盘事件和事件监听
 pub struct AppEvent;
@@ -118,17 +119,17 @@ impl AppEvent {
     /// 处理回车键：发送消息给模型或执行命令
     pub fn handle_enter_key(app: &mut App) {
         let monitor = perf_start!("handle_enter_key", 50);
-        
+
         // 首先检查是否显示选项对话框
         if app.option_dialog.visible {
             // 先获取需要的数据，避免同时借用
             let selected_option = app.option_dialog.get_selected_option().cloned();
             let selected_index = app.option_dialog.get_selected_index().unwrap_or(0);
             let _title = app.option_dialog.title.clone();
-            
+
             // 隐藏选项对话框
             app.option_dialog.hide();
-            
+
             // 如果有选中的选项，显示系统消息
             if let Some(selected_option) = selected_option {
                 // 添加系统消息显示用户的选择
@@ -137,14 +138,14 @@ impl AppEvent {
                     selected_option,
                     selected_index + 1
                 ));
-                
+
                 // 这里可以添加回调机制来处理选项选择
                 // 例如：app.handle_option_selection(&title, selected_index, &selected_option);
             }
             perf_end!(monitor);
             return;
         }
-        
+
         // 然后检查是否显示命令提示
         if app.input.should_show_suggestions() {
             // 获取选中的命令并克隆它，以释放对app.input的借用
@@ -154,7 +155,7 @@ impl AppEvent {
                 app.input.clear();
                 app.input.hide_suggestions();
                 app.cursor_offset = 0;
-                
+
                 // 使用block_in_place来执行阻塞操作
                 // 这会通知Tokio运行时当前线程将暂时阻塞
                 tokio::task::block_in_place(|| {
@@ -169,8 +170,8 @@ impl AppEvent {
                 return;
             }
         }
-        
-        let mut chat = {app.chat.lock().unwrap()};
+
+        let mut chat = { app.chat.lock().unwrap() };
         if !chat.is_running() {
             match chat.get_state() {
                 EChatState::WaitingToolConfirm => {
@@ -188,7 +189,7 @@ impl AppEvent {
                     } else if res == "no" || res == "n" {
                         chat.reject_tool_call();
                     }
-                },
+                }
                 // 处理对话轮次确认
                 EChatState::WaitingTurnConfirm => {
                     let res = app.input.content.to_lowercase();
@@ -209,13 +210,14 @@ impl AppEvent {
                                 chat_clone,
                                 input_clone,
                                 event_tx_clone,
-                            ).await;
+                            )
+                            .await;
                         });
                     } else if res == "no" || res == "n" {
                         // 用户选择停止，清除等待状态但不重置计数
                         chat.confirm();
                     }
-                },
+                }
                 EChatState::Idle => {
                     info!("Idle 状态，开始对话");
                     tokio::spawn(crate::tui::appchat::AppChat::handle_chat(
@@ -230,7 +232,7 @@ impl AppEvent {
             app.cursor_offset = 0;
             app.input.clear();
         }
-        
+
         perf_end!(monitor);
     }
 
@@ -246,7 +248,7 @@ impl AppEvent {
     /// 处理所有事件
     pub fn handle_events(app: &mut App, event: ETuiEvent) -> io::Result<()> {
         let monitor = perf_start!("handle_events", 20);
-        
+
         match event {
             ETuiEvent::KeyEvent(key) => {
                 if let Err(e) = app.event_tx.send(ETuiEvent::RefreshUI) {
@@ -305,7 +307,7 @@ impl AppEvent {
             }
             _ => {} // 忽略其他事件类型
         }
-        
+
         perf_end!(monitor);
         Ok(())
     }

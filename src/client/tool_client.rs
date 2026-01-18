@@ -1,13 +1,19 @@
+use crate::{
+    mcp::mcp_manager,
+    model::param::{ModelMessage, ToolCall},
+};
 use async_stream::stream;
 use futures::Stream;
-use serde_json::Value;
-use crate::{mcp::mcp_manager, model::param::{ModelMessage, ToolCall}};
 use log::warn;
+use serde_json::Value;
 
 pub struct ToolClient;
 
 impl ToolClient {
-    pub fn call(&self, calls: Vec<ToolCall>)-> impl Stream<Item = Result<ModelMessage, anyhow::Error>> + '_ {
+    pub fn call(
+        &self,
+        calls: Vec<ToolCall>,
+    ) -> impl Stream<Item = Result<ModelMessage, anyhow::Error>> + '_ {
         stream! {
             // 输入验证：检查工具调用列表是否为空
             if calls.is_empty() {
@@ -47,7 +53,7 @@ impl ToolClient {
 
                 // 调用工具
                 let result = mcp_manager::McpManager::global().call_tool(&call.function.name, &arguments).await;
-                
+
                 match result {
                     Ok(s) => {
                         yield Ok(ModelMessage::tool(s, call.clone()));

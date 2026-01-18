@@ -77,10 +77,11 @@ impl NapCatClient {
                             let stream = self.chat.chat(&prompt);
                             match get_output_tostring(stream).await {
                                 Ok(response) => {
-                                    let payload = ApiPayload::SendGroupForwardMsg(SendGroupForwardMsg {
-                                        group_id: group_message.group_id,
-                                        messages: vec![MessageSegment::text(response)],
-                                    });
+                                    let payload =
+                                        ApiPayload::SendGroupForwardMsg(SendGroupForwardMsg {
+                                            group_id: group_message.group_id,
+                                            messages: vec![MessageSegment::text(response)],
+                                        });
                                     let res = conn.clone().call_api(payload).await;
                                     info!("{:?}", res);
                                 }

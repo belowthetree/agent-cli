@@ -1,21 +1,25 @@
 use std::{
     io::{self},
-    sync::{
-        mpsc, Arc, Mutex
-    },
+    sync::{Arc, Mutex, mpsc},
 };
 
 use clap::Parser;
 use log::info;
-use ratatui::{
-    crossterm::event::KeyEvent, widgets::ScrollbarState, DefaultTerminal, Frame
-};
+use ratatui::{DefaultTerminal, Frame, crossterm::event::KeyEvent, widgets::ScrollbarState};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    Args, chat::Chat, mcp, model::param::ModelMessage, tui::{
-        appevent::AppEvent, ui::option_dialog::OptionDialog, renderer::Renderer, state_manager::StateManager, ui::{inputarea::InputArea, messageblock::MessageBlock}
-    }
+    Args,
+    chat::Chat,
+    mcp,
+    model::param::ModelMessage,
+    tui::{
+        appevent::AppEvent,
+        renderer::Renderer,
+        state_manager::StateManager,
+        ui::option_dialog::OptionDialog,
+        ui::{inputarea::InputArea, messageblock::MessageBlock},
+    },
 };
 
 #[derive(PartialEq, Debug)]
@@ -29,7 +33,7 @@ pub enum ETuiEvent {
 }
 
 /// 终端用户界面应用程序
-/// 
+///
 /// 管理TUI状态、事件处理和渲染逻辑
 pub struct App {
     /// 聊天会话状态，包含模型上下文和工具配置
@@ -64,7 +68,7 @@ pub struct App {
 
 impl App {
     /// 创建新的App实例
-    /// 
+    ///
     /// 根据命令行参数初始化聊天会话，设置事件通道和滚动信号通道
     pub fn new() -> Self {
         let mut chat = Chat::default();
@@ -73,11 +77,11 @@ impl App {
             chat = chat.tools(mcp::get_config_tools());
         }
         let (event_tx, event_rx) = mpsc::channel::<ETuiEvent>();
-        
+
         // 初始化命令注册器并获取命令列表
         let registry = crate::tui::init_global_registry();
         let commands = registry.command_names();
-        
+
         Self {
             chat: Arc::new(Mutex::new(chat)),
             index: 0,
@@ -97,13 +101,13 @@ impl App {
     }
 
     /// 渲染应用程序界面
-    /// 
+    ///
     /// 将应用程序状态渲染到终端帧中，包括：
     /// - 消息块显示区域
     /// - 垂直滚动条
     /// - 文本输入区域
     /// - 光标位置
-    /// 
+    ///
     /// 此方法根据当前滚动位置和窗口大小计算哪些消息块需要显示，
     /// 并处理部分消息块被截断的情况。
     pub fn render(&mut self, frame: &mut Frame<'_>) {
@@ -111,19 +115,18 @@ impl App {
     }
 
     /// 运行应用程序主循环
-    /// 
+    ///
     /// 启动事件监听线程并处理以下任务：
     /// 1. 监听键盘事件（在后台线程中）
     /// 2. 当界面需要更新时重新渲染
     /// 3. 处理用户输入事件
     /// 4. 响应滚动到底部的信号
-    /// 
+    ///
     /// 循环持续运行直到用户退出（按ESC键）或发生错误。
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
         info!("上下文限制 {}", self.chat.lock().unwrap().get_token_limit());
         let cancel = CancellationToken::new();
-        let t = tokio::spawn(
-        AppEvent::watch_events(
+        let t = tokio::spawn(AppEvent::watch_events(
             self.event_tx.clone(),
             cancel.clone(),
         ));
@@ -148,9 +151,8 @@ impl App {
         Ok(())
     }
 
-
     /// 刷新应用程序显示状态
-    /// 
+    ///
     /// 根据当前聊天上下文更新消息块列表和滚动条状态：
     /// 1. 从聊天上下文中提取用户和助手消息
     /// 2. 过滤掉系统和工具消息
@@ -176,12 +178,12 @@ impl App {
     pub async fn execute_command(&mut self, command: &str) -> bool {
         // 移除开头的斜杠
         let command = command.trim_start_matches('/');
-        
+
         // 分割命令和参数
         let parts: Vec<&str> = command.splitn(2, ' ').collect();
         let cmd_name = parts[0];
         let args = if parts.len() > 1 { parts[1] } else { "" };
-        
+
         // 从注册器中查找命令
         let registry = crate::tui::global_registry();
         if let Some(cmd) = registry.find(cmd_name) {
@@ -204,9 +206,9 @@ impl App {
             log::error!("Failed to send scroll to bottom {:?}", e);
         }
     }
-    
+
     /// 添加信息消息
-    /// 
+    ///
     /// 添加一个信息消息到信息消息列表中，用于显示指令、提示等信息。
     /// 这些消息会显示在聊天消息之间。
     pub fn add_info_message(&mut self, message: &str) {
@@ -220,11 +222,11 @@ impl App {
             log::error!("Failed to send scroll to bottom {:?}", e);
         }
     }
-    
+
     /// 显示选项对话框
-    /// 
+    ///
     /// 显示一个选项对话框供用户选择，用户可以使用上下键导航，回车键确认，ESC键取消。
-    /// 
+    ///
     /// # 参数
     /// - `title`: 对话框标题
     /// - `options`: 选项列表

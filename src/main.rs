@@ -1,6 +1,7 @@
 use crate::client::handle_output;
 use clap::{Parser, command};
 use log::info;
+mod acp;
 mod chat;
 mod client;
 mod config;
@@ -10,9 +11,8 @@ mod model;
 #[cfg(feature = "napcat")]
 mod napcat;
 mod prompt;
-mod tui;
 mod remote;
-mod acp;
+mod tui;
 
 /// 获取日志配置文件路径
 fn get_log_config_path(acp_mode: bool) -> (String, Option<std::path::PathBuf>) {
@@ -34,7 +34,7 @@ fn get_log_config_path(acp_mode: bool) -> (String, Option<std::path::PathBuf>) {
 /// 创建默认的log4rs配置文件
 fn create_default_log4rs_config(acp_mode: bool) -> anyhow::Result<()> {
     let (_config_path, log_dir) = get_log_config_path(acp_mode);
-    
+
     let log_path = if let Some(dir) = log_dir {
         std::fs::create_dir_all(&dir)?;
         dir.join("agent-cli.log").to_string_lossy().to_string()
@@ -43,7 +43,8 @@ fn create_default_log4rs_config(acp_mode: bool) -> anyhow::Result<()> {
     };
     let log_path = log_path.replace("\\", "/");
 
-    let default_config = format!(r#"---
+    let default_config = format!(
+        r#"---
 # log4rs.yaml
 # 检查配置文件变动的时间间隔
 refresh_rate: 30 seconds
@@ -62,7 +63,9 @@ root:
   level: warn
   appenders:
     - file
-"#, log_path);
+"#,
+        log_path
+    );
 
     if acp_mode {
         // ACP 模式下将配置文件写入标准数据路径
@@ -70,7 +73,10 @@ root:
             let config_path = data_dir.join("agent-cli").join("log4rs.yaml");
             std::fs::create_dir_all(data_dir.join("agent-cli"))?;
             std::fs::write(&config_path, default_config)?;
-            info!("已创建ACP模式的log4rs.yaml配置文件到: {}", config_path.display());
+            info!(
+                "已创建ACP模式的log4rs.yaml配置文件到: {}",
+                config_path.display()
+            );
             return Ok(());
         }
     }
@@ -104,24 +110,27 @@ struct Args {
     /// 启动ACP模式
     #[arg(long, default_missing_value = "true", num_args = 0..=1)]
     acp: bool,
-    /// ACP传输模式（仅对ACP模式有效）：stdio（默认）、wss、http
+    /// ACP传输模式（仅对ACP模式有效）：stdio（默认）、wss
     #[arg(long, default_value = "stdio")]
     transport: String,
+    /// WSS监听端口（仅对ACP模式有效，默认8338）
+    #[arg(long, default_value_t = 8338)]
+    wssport: u16,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    
+
     // ACP 模式下使用标准数据路径的日志配置
     let (log_config_path, _log_dir) = get_log_config_path(args.acp);
-    
+
     // 检查配置文件是否存在
     let config_path = std::path::Path::new(&log_config_path);
     if !config_path.exists() {
         create_default_log4rs_config(args.acp)?;
     }
-    
+
     log4rs::init_file(&log_config_path, Default::default()).unwrap();
     // 根据 ACP 模式决定如何加载配置
     info!("{:?}", args);
@@ -132,20 +141,20 @@ async fn main() -> anyhow::Result<()> {
     };
 
     mcp::init().await;
-    
+
     for env in config.envs {
         unsafe {
             std::env::set_var(env.key, env.value);
         }
     }
-    
+
     // 优先处理 remote 模式
     if let Some(addr) = args.remote {
         info!("Starting remote server on {}", addr);
         remote::start_server(&addr).await?;
         return Ok(());
     }
-    
+
     // 优先处理 napcat
     #[cfg(feature = "napcat")]
     if args.napcat {
@@ -160,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
     // 优先处理 ACP 模式
     if args.acp {
         info!("Starting ACP server with transport: {}", args.transport);
-        start_acp_server(args.transport).await?;
+        start_acp_server(&args).await?;
         return Ok(());
     }
 
@@ -182,30 +191,54 @@ async fn chat() {
         chat = chat.tools(mcp::get_config_tools());
     }
     if Some(true) == args.stream {
-        handle_output(chat.stream_chat(&args.prompt.unwrap_or_default())).await.unwrap();
+        handle_output(chat.stream_chat(&args.prompt.unwrap_or_default()))
+            .await
+            .unwrap();
     } else {
-        handle_output(chat.chat(&args.prompt.unwrap_or_default())).await.unwrap();
+        handle_output(chat.chat(&args.prompt.unwrap_or_default()))
+            .await
+            .unwrap();
     }
 }
 
 /// 启动ACP服务器
-async fn start_acp_server(transport: String) -> anyhow::Result<()> {
+async fn start_acp_server(args: &Args) -> anyhow::Result<()> {
     info!("开启 acp");
-    use crate::acp::agent_impl::run_stdio_agent;
-    
-    let server_name = "agent-cli".to_string();
-    let server_version = env!("CARGO_PKG_VERSION").to_string();
-    
-    match transport.as_str() {
-        "stdio" => {
-            info!("ACP Agent (stdio) starting...");
-            run_stdio_agent(server_name, server_version).await?;
-        }
+
+    use crate::acp::connection::{ConnectionConfig, ConnectionType, run_acp_agent};
+
+    // 确定连接类型
+    let connection_type = match args.transport.as_str() {
+        "stdio" => ConnectionType::Stdio,
+        "wss" => ConnectionType::Wss,
         _ => {
-            return Err(anyhow::anyhow!("不支持的传输模式: {}，目前只支持 stdio", transport));
+            return Err(anyhow::anyhow!(
+                "不支持的传输模式: {}，支持的模式: stdio, wss",
+                args.transport
+            ));
         }
+    };
+
+    // 创建连接配置
+    let connection_config = ConnectionConfig {
+        connection_type,
+        wss_port: if connection_type == ConnectionType::Wss {
+            Some(args.wssport)
+        } else {
+            None
+        },
+        server_name: "agent-cli".to_string(),
+        server_version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+
+    info!("ACP Agent 启动，连接类型: {:?}", connection_type);
+    if connection_type == ConnectionType::Wss {
+        info!("WSS 监听端口: {}", args.wssport);
     }
-    
+
+    // 运行 ACP Agent
+    run_acp_agent(connection_config).await?;
+
     Ok(())
 }
 
@@ -279,8 +312,7 @@ mod tests {
     async fn test_search_tool_chat() {
         log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
         mcp::init().await;
-        let mut chat = Chat::new(config::Config::local().unwrap())
-            .tools(mcp::get_basic_tools());
+        let mut chat = Chat::new(config::Config::local().unwrap()).tools(mcp::get_basic_tools());
         let res = chat.chat("你好，帮我查一下github提交信息");
         handle_output(res).await;
     }

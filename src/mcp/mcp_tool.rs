@@ -19,7 +19,7 @@ impl McpTool {
 }
 
 impl McpTool {
-    pub fn get_tool(&self)->Tool {
+    pub fn get_tool(&self) -> Tool {
         self.tool.clone()
     }
 
@@ -32,16 +32,20 @@ impl McpTool {
         name
     }
 
-    pub fn origin_name(&self)->String {
+    pub fn origin_name(&self) -> String {
         self.tool.name.to_string()
     }
 
-    pub fn desc(&self)->String {
-        self.tool.description.clone().unwrap_or_default().to_string()
+    pub fn desc(&self) -> String {
+        self.tool
+            .description
+            .clone()
+            .unwrap_or_default()
+            .to_string()
     }
 }
 
-impl Into<Tool> for McpTool{
+impl Into<Tool> for McpTool {
     fn into(self) -> Tool {
         self.tool
     }

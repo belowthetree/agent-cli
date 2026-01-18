@@ -1,11 +1,11 @@
 //! 远程通信的协议定义。
-//! 
+//!
 //! 定义远程客户端与服务器之间通信的消息格式。
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{chat::StreamedChatResponse};
+use crate::chat::StreamedChatResponse;
 
 /// 可以从远程客户端发送的输入类型。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,7 +14,7 @@ pub enum InputType {
     Text(String),
     /// Base64 编码的图像数据，带有可选的 MIME 类型
     Image {
-        data: String,  // base64 encoded
+        data: String, // base64 encoded
         mime_type: Option<String>,
     },
     /// 结构化的指令/命令
@@ -26,7 +26,7 @@ pub enum InputType {
     File {
         filename: String,
         content_type: String,
-        data: String,  // base64 encoded
+        data: String, // base64 encoded
     },
     /// 多种输入类型的组合
     Multi(Vec<InputType>),
@@ -63,10 +63,17 @@ impl InputType {
             InputType::Image { data: _, mime_type } => {
                 format!("[Image: {}]", mime_type.as_deref().unwrap_or("unknown"))
             }
-            InputType::Instruction { command, parameters } => {
+            InputType::Instruction {
+                command,
+                parameters,
+            } => {
                 format!("[Instruction: {} with params: {}]", command, parameters)
             }
-            InputType::File { filename, content_type, data: _ } => {
+            InputType::File {
+                filename,
+                content_type,
+                data: _,
+            } => {
                 format!("[File: {} ({})]", filename, content_type)
             }
             InputType::Multi(inputs) => {
@@ -77,14 +84,27 @@ impl InputType {
             InputType::Interrupt => "[Interrupt]".to_string(),
             InputType::Regenerate => "[Regenerate]".to_string(),
             InputType::ClearContext => "[ClearContext]".to_string(),
-            InputType::ToolConfirmationResponse { name, arguments, approved, reason } => {
-                format!("[ToolConfirmationResponse: {} with args: {}, approved: {}, reason: {}]", 
-                    name, arguments, approved, reason.as_deref().unwrap_or("none"))
-            },
+            InputType::ToolConfirmationResponse {
+                name,
+                arguments,
+                approved,
+                reason,
+            } => {
+                format!(
+                    "[ToolConfirmationResponse: {} with args: {}, approved: {}, reason: {}]",
+                    name,
+                    arguments,
+                    approved,
+                    reason.as_deref().unwrap_or("none")
+                )
+            }
             InputType::TurnConfirmationResponse { confirmed, reason } => {
-                format!("[TurnConfirmationResponse: confirmed: {}, reason: {}]", 
-                    confirmed, reason.as_deref().unwrap_or("none"))
-            },
+                format!(
+                    "[TurnConfirmationResponse: confirmed: {}, reason: {}]",
+                    confirmed,
+                    reason.as_deref().unwrap_or("none")
+                )
+            }
         }
     }
 }
@@ -195,7 +215,7 @@ pub struct TokenUsage {
 }
 
 impl RemoteResponse {
-    pub fn model_message(msg: StreamedChatResponse, request_id: String)->Result<Self, ()> {
+    pub fn model_message(msg: StreamedChatResponse, request_id: String) -> Result<Self, ()> {
         match msg {
             StreamedChatResponse::Text(text) => {
                 // 实时发送文本块给客户端（使用 Stream 响应）
@@ -225,7 +245,7 @@ impl RemoteResponse {
                     token_usage: None,
                 })
             }
-            _ => {Err(())}
+            _ => Err(()),
         }
     }
 
@@ -240,18 +260,25 @@ impl RemoteResponse {
     }
 
     /// 创建一个带有详细错误信息的错误响应。
-    pub fn detailed_error(request_id: &str, error_type: &str, error_message: &str, details: Option<serde_json::Value>) -> Self {
+    pub fn detailed_error(
+        request_id: &str,
+        error_type: &str,
+        error_message: &str,
+        details: Option<serde_json::Value>,
+    ) -> Self {
         let error_info = if let Some(details) = details {
             serde_json::json!({
                 "type": error_type,
                 "message": error_message,
                 "details": details
-            }).to_string()
+            })
+            .to_string()
         } else {
             serde_json::json!({
                 "type": error_type,
                 "message": error_message
-            }).to_string()
+            })
+            .to_string()
         };
 
         Self {
@@ -263,13 +290,23 @@ impl RemoteResponse {
     }
 
     /// 创建一个工具调用错误响应。
-    pub fn tool_error(request_id: &str, tool_name: &str, error: &str, arguments: Option<serde_json::Value>) -> Self {
+    pub fn tool_error(
+        request_id: &str,
+        tool_name: &str,
+        error: &str,
+        arguments: Option<serde_json::Value>,
+    ) -> Self {
         let error_details = serde_json::json!({
             "tool": tool_name,
             "error": error,
             "arguments": arguments
         });
 
-        Self::detailed_error(request_id, "tool_execution_error", &format!("Tool '{}' execution failed", tool_name), Some(error_details))
+        Self::detailed_error(
+            request_id,
+            "tool_execution_error",
+            &format!("Tool '{}' execution failed", tool_name),
+            Some(error_details),
+        )
     }
 }

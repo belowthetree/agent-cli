@@ -3,15 +3,15 @@ use log::{info, warn};
 
 use crate::config::{self, Config};
 use crate::mcp::McpTool;
-use crate::model::param::{ModelMessage};
+use crate::model::param::ModelMessage;
 use crate::prompt;
 
 pub mod chat_state;
 pub mod chat_stream;
 mod chat_tools;
 
-pub use chat_state::EChatState;
 pub use chat_state::ChatState;
+pub use chat_state::EChatState;
 pub use chat_stream::StreamedChatResponse;
 
 /// # Chat
@@ -44,8 +44,8 @@ pub use chat_stream::StreamedChatResponse;
 #[derive(Clone)]
 pub struct Chat {
     state: ChatState,
-    max_context_num: usize,   // 保存token限制的副本
-    auto_compress_threshold: f32,  // 自动压缩阈值（token使用比例）
+    max_context_num: usize,       // 保存token限制的副本
+    auto_compress_threshold: f32, // 自动压缩阈值（token使用比例）
 }
 
 /// Chat 构建器，用于改进初始化和配置验证
@@ -75,7 +75,9 @@ impl ChatBuilder {
         }
 
         // 使用构建器中的值或回退到配置中的默认值
-        let ask_before_tool_execution = self.ask_before_tool_execution.unwrap_or(self.config.ask_before_tool_execution);
+        let ask_before_tool_execution = self
+            .ask_before_tool_execution
+            .unwrap_or(self.config.ask_before_tool_execution);
         let max_context_num = self.max_context_num.unwrap_or(self.config.max_context_num);
 
         // 验证最大对话轮次数
@@ -85,26 +87,26 @@ impl ChatBuilder {
 
         let client = crate::client::chat_client::ChatClient::new(
             self.config.api_key.clone(),
-            self.config.url.clone().unwrap_or("https://api.deepseek.com".into()),
+            self.config
+                .url
+                .clone()
+                .unwrap_or("https://api.deepseek.com".into()),
             self.config.model.clone().unwrap_or("deepseek-chat".into()),
             self.tools,
         );
 
         let context = vec![ModelMessage::system(
-            self.config.prompt.map(|p| prompt::build_enhanced_prompt(&p))
-                .unwrap_or_else(|| prompt::get_default_enhanced_prompt())
+            self.config
+                .prompt
+                .map(|p| prompt::build_enhanced_prompt(&p))
+                .unwrap_or_else(|| prompt::get_default_enhanced_prompt()),
         )];
 
         let tokens = client.get_token_limit();
-        let state = ChatState::new(
-            client,
-            context,
-            tokens,
-            ask_before_tool_execution,
-        );
+        let state = ChatState::new(client, context, tokens, ask_before_tool_execution);
 
-        Ok(Chat { 
-            state, 
+        Ok(Chat {
+            state,
             max_context_num,
             auto_compress_threshold: self.config.auto_compress_threshold,
         })
@@ -128,7 +130,7 @@ impl Chat {
             })
     }
 
-    pub fn get_token_limit(&self)->u32 {
+    pub fn get_token_limit(&self) -> u32 {
         self.state.client.get_token_limit()
     }
 
@@ -141,7 +143,7 @@ impl Chat {
         self.state.get_cancel_token()
     }
 
-    pub fn get_state(&self)->EChatState {
+    pub fn get_state(&self) -> EChatState {
         self.state.get_state()
     }
 
@@ -170,8 +172,10 @@ impl Chat {
     }
 
     // 是否正在等待工具调用确认
-    pub fn is_need_tool_confirm(&self)-> bool {
-        self.get_state() != EChatState::WaitingToolUse && self.state.should_tool_confirmation() && self.is_remain_tool_call()
+    pub fn is_need_tool_confirm(&self) -> bool {
+        self.get_state() != EChatState::WaitingToolUse
+            && self.state.should_tool_confirmation()
+            && self.is_remain_tool_call()
     }
 
     /// 拒绝工具调用
@@ -183,7 +187,9 @@ impl Chat {
     }
 
     // 用已有的上下文再次发送给模型，用于突然中断的情况
-    pub fn stream_rechat(&mut self) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
+    pub fn stream_rechat(
+        &mut self,
+    ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_ {
         async_stream::stream! {
             loop {
                 // 先判断是否超过轮次
@@ -252,7 +258,10 @@ impl Chat {
         }
     }
 
-    pub fn chat<'a, 'b>(&'a mut self, prompt: &'b str) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a 
+    pub fn chat<'a, 'b>(
+        &'a mut self,
+        prompt: &'b str,
+    ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a
     where
         'b: 'a,
     {
@@ -329,7 +338,8 @@ impl Chat {
         &'a mut self,
         prompt: &'a str,
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a {
-        self.state.add_message(ModelMessage::user(prompt.to_string()));
+        self.state
+            .add_message(ModelMessage::user(prompt.to_string()));
         async_stream::stream! {
             let stream = self.stream_rechat();
             pin_mut!(stream);
@@ -344,7 +354,8 @@ impl Chat {
         // 获取max_tokens的值
         let max_tokens = self.get_token_limit();
         info!("限制：{} {}", max_tokens, self.auto_compress_threshold);
-        self.state.should_auto_compress(self.auto_compress_threshold, max_tokens)
+        self.state
+            .should_auto_compress(self.auto_compress_threshold, max_tokens)
     }
 
     /// 自动压缩对话（异步版本，供外部调用）
@@ -372,7 +383,10 @@ impl Chat {
 
     /// 获取当前对话轮次统计
     pub fn get_conversation_turn_info(&self) -> (usize, usize) {
-        (self.state.get_conversation_turn_info(), self.max_context_num)
+        (
+            self.state.get_conversation_turn_info(),
+            self.max_context_num,
+        )
     }
 
     /// 获取聊天上下文
@@ -389,7 +403,7 @@ impl Chat {
     pub async fn compress_conversation(&mut self) -> bool {
         // 临时保存当前上下文，以便压缩失败时恢复
         let original_context = self.state.context().clone();
-        
+
         // 如果上下文为空或只有系统消息，不需要压缩
         if original_context.len() <= 1 {
             info!("上下文过短，无需压缩");
@@ -398,12 +412,14 @@ impl Chat {
 
         // 构建压缩prompt
         let compress_prompt = self.build_compress_prompt();
-        
+
         info!("开始压缩对话，当前上下文长度: {}", original_context.len());
-        
+
         // 创建一个临时的压缩消息，包含当前上下文
-        let mut compress_messages = vec![ModelMessage::system("你是一个对话压缩助手。请将以下对话压缩成简洁的摘要，保留关键信息和上下文，但大幅减少token使用。只返回压缩后的摘要内容，不要添加额外解释。")];
-        
+        let mut compress_messages = vec![ModelMessage::system(
+            "你是一个对话压缩助手。请将以下对话压缩成简洁的摘要，保留关键信息和上下文，但大幅减少token使用。只返回压缩后的摘要内容，不要添加额外解释。",
+        )];
+
         // 添加除了系统消息外的所有消息作为参考
         for msg in &original_context[1..] {
             let role = msg.role.as_ref();
@@ -413,19 +429,22 @@ impl Chat {
             } else {
                 String::new()
             };
-            compress_messages.push(ModelMessage::user(format!("{}: {}{}", role, content, think)));
+            compress_messages.push(ModelMessage::user(format!(
+                "{}: {}{}",
+                role, content, think
+            )));
         }
-        
+
         compress_messages.push(ModelMessage::user(compress_prompt));
 
         // 先获取client的引用，避免后续借用冲突
         let client = self.state.client().clone();
-        
+
         // 使用非流式方式请求压缩
         self.state.set_state(EChatState::Compressing);
         let stream = client.chat2(compress_messages);
         pin_mut!(stream);
-        
+
         let mut compressed_content = String::new();
         while let Some(res) = stream.next().await {
             match res {
@@ -448,23 +467,26 @@ impl Chat {
 
         // 构建新的压缩后上下文
         let mut new_context = Vec::new();
-        
+
         // 保留系统消息
         if let Some(system_msg) = original_context.first() {
             if system_msg.role == "system" {
                 new_context.push(system_msg.clone());
             }
         }
-        
+
         // 添加压缩后的摘要作为用户消息
-        new_context.push(ModelMessage::user(format!("对话历史摘要: {}", compressed_content)));
-        
+        new_context.push(ModelMessage::user(format!(
+            "对话历史摘要: {}",
+            compressed_content
+        )));
+
         // 替换上下文
         *self.state.context_mut() = new_context;
-        
+
         // 重置对话轮次计数，因为现在上下文被压缩了
         self.state.reset_conversation_turn();
-        
+
         info!("对话压缩成功，新上下文长度: {}", self.state.context().len());
         true
     }
@@ -480,6 +502,6 @@ impl Chat {
 6. 只返回压缩后的摘要，不要添加任何解释或说明
 
 压缩后的摘要应该足够简洁，但包含所有必要信息，以便继续对话时能理解上下文。"#
-.to_string()
+            .to_string()
     }
 }

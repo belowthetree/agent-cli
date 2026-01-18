@@ -57,7 +57,7 @@ impl ChatState {
     }
 
     /// 检查是否正在运行
-    pub fn get_state(&self)->EChatState {
+    pub fn get_state(&self) -> EChatState {
         self.state.clone()
     }
 
@@ -126,15 +126,19 @@ impl ChatState {
                 total_tokens = usage.total_tokens;
             }
         }
-        
+
         // 如果提供了新的使用量，加上它
         if let Some(usage) = new_usage {
             total_tokens += usage.total_tokens;
         }
-        
+
         // 检查是否超过限制
         if total_tokens > self.max_tokens {
-            log::warn!("Token使用超过限制: {}/{} tokens", total_tokens, self.max_tokens);
+            log::warn!(
+                "Token使用超过限制: {}/{} tokens",
+                total_tokens,
+                self.max_tokens
+            );
             return true;
         }
         false
@@ -155,7 +159,7 @@ impl ChatState {
         &self.client
     }
 
-    pub fn get_tool_calls(&self)->Vec<ToolCall> {
+    pub fn get_tool_calls(&self) -> Vec<ToolCall> {
         if let Some(last) = self.context().last() {
             if let Some(tools) = &last.tool_calls {
                 tools.clone()
@@ -189,8 +193,11 @@ impl ChatState {
         info!("比例 {} {} {}", current, ratio, threshold);
         let should_compress = ratio >= threshold;
         if should_compress {
-            info!("Token使用比例: {:.2}%, 阈值: {}%, 触发自动压缩", 
-                ratio * 100.0, threshold * 100.0);
+            info!(
+                "Token使用比例: {:.2}%, 阈值: {}%, 触发自动压缩",
+                ratio * 100.0,
+                threshold * 100.0
+            );
         }
         should_compress
     }

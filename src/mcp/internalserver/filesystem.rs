@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
-use std::fs;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use log::info;
 use rmcp::model::{Annotated, CallToolResult, RawContent, RawTextContent, Tool};
 use serde_json::{Map, Value};
-use anyhow::{anyhow, Result};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::mcp::internalserver::InternalTool;
 
@@ -20,20 +20,18 @@ impl FileSystemTool {
     /// 检查路径是否在当前工作目录下
     fn is_path_allowed(path: &Path) -> bool {
         let current_dir = Self::get_current_dir();
-        
+
         // 特殊处理当前目录 "."
         if path == Path::new(".") || path == Path::new("./") {
             return true;
         }
-        
+
         // 首先尝试规范化路径
         match path.canonicalize() {
             Ok(canonical_path) => {
                 // 规范化当前目录进行比较
                 match current_dir.canonicalize() {
-                    Ok(canonical_current_dir) => {
-                        canonical_path.starts_with(&canonical_current_dir)
-                    }
+                    Ok(canonical_current_dir) => canonical_path.starts_with(&canonical_current_dir),
                     Err(_) => {
                         // 如果无法规范化当前目录，使用原始路径比较
                         canonical_path.starts_with(&current_dir)
@@ -75,14 +73,12 @@ impl FileSystemTool {
                     let absolute_path = current_dir.join(path);
                     // 检查规范化后的绝对路径是否在当前目录下
                     match absolute_path.canonicalize() {
-                        Ok(canonical_absolute) => {
-                            match current_dir.canonicalize() {
-                                Ok(canonical_current) => {
-                                    canonical_absolute.starts_with(&canonical_current)
-                                }
-                                Err(_) => canonical_absolute.starts_with(&current_dir),
+                        Ok(canonical_absolute) => match current_dir.canonicalize() {
+                            Ok(canonical_current) => {
+                                canonical_absolute.starts_with(&canonical_current)
                             }
-                        }
+                            Err(_) => canonical_absolute.starts_with(&current_dir),
+                        },
                         Err(_) => {
                             // 如果仍然无法规范化，检查原始路径是否以当前目录开头
                             absolute_path.starts_with(&current_dir)
@@ -101,27 +97,30 @@ impl FileSystemTool {
     /// 读取文件内容
     fn read_file(&self, path: &Path) -> Result<String> {
         if Self::needs_confirmation(path) {
-            return Err(anyhow!("路径 '{}' 不在当前工作目录下，需要用户手动同意", path.display()));
+            return Err(anyhow!(
+                "路径 '{}' 不在当前工作目录下，需要用户手动同意",
+                path.display()
+            ));
         }
-        
-        fs::read_to_string(path)
-            .map_err(|e| anyhow!("读取文件失败: {}", e))
+
+        fs::read_to_string(path).map_err(|e| anyhow!("读取文件失败: {}", e))
     }
 
     /// 写入文件内容
     fn write_file(&self, path: &Path, content: &str) -> Result<()> {
         if Self::needs_confirmation(path) {
-            return Err(anyhow!("路径 '{}' 不在当前工作目录下，需要用户手动同意", path.display()));
+            return Err(anyhow!(
+                "路径 '{}' 不在当前工作目录下，需要用户手动同意",
+                path.display()
+            ));
         }
 
         // 确保目录存在
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| anyhow!("创建目录失败: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| anyhow!("创建目录失败: {}", e))?;
         }
 
-        fs::write(path, content)
-            .map_err(|e| anyhow!("写入文件失败: {}", e))
+        fs::write(path, content).map_err(|e| anyhow!("写入文件失败: {}", e))
     }
 
     /// 修改文件内容（使用差异格式）
@@ -130,7 +129,7 @@ impl FileSystemTool {
     /// 2. 模糊匹配：支持正则表达式模式
     /// 3. 行级差异：支持基于行的搜索和替换
     /// 4. 换行符兼容：自动处理 \r\n 和 \n 的差异
-    /// 
+    ///
     /// 差异格式示例：
     /// ------- SEARCH
     /// 原始内容
@@ -139,78 +138,64 @@ impl FileSystemTool {
     /// +++++++ REPLACE
     fn modify_file(&self, path: &Path, search: &str, replacement: &str) -> Result<()> {
         if Self::needs_confirmation(path) {
-            return Err(anyhow!("路径 '{}' 不在当前工作目录下，需要用户手动同意", path.display()));
+            return Err(anyhow!(
+                "路径 '{}' 不在当前工作目录下，需要用户手动同意",
+                path.display()
+            ));
         }
 
         // 读取文件内容
-        let content = fs::read_to_string(path)
-            .map_err(|e| anyhow!("读取文件失败: {}", e))?;
-        
+        let content = fs::read_to_string(path).map_err(|e| anyhow!("读取文件失败: {}", e))?;
+
         // 尝试多种搜索策略
-        
+
         // 策略1: 直接匹配
         if let Some(pos) = content.find(search) {
             let end_pos = pos + search.len();
-            let new_content = format!(
-                "{}{}{}",
-                &content[..pos],
-                replacement,
-                &content[end_pos..]
-            );
-            
-            fs::write(path, new_content)
-                .map_err(|e| anyhow!("写入文件失败: {}", e))?;
+            let new_content = format!("{}{}{}", &content[..pos], replacement, &content[end_pos..]);
+
+            fs::write(path, new_content).map_err(|e| anyhow!("写入文件失败: {}", e))?;
             return Ok(());
         }
-        
+
         // 策略2: 如果直接匹配失败，尝试处理换行符差异
         // 将搜索字符串中的 \r\n 替换为 \n
         let search_normalized = search.replace("\r\n", "\n");
         if let Some(pos) = content.find(&search_normalized) {
             // 使用规范化后的搜索字符串进行替换
             let end_pos = pos + search_normalized.len();
-            let new_content = format!(
-                "{}{}{}",
-                &content[..pos],
-                replacement,
-                &content[end_pos..]
-            );
-            
-            fs::write(path, new_content)
-                .map_err(|e| anyhow!("写入文件失败: {}", e))?;
+            let new_content = format!("{}{}{}", &content[..pos], replacement, &content[end_pos..]);
+
+            fs::write(path, new_content).map_err(|e| anyhow!("写入文件失败: {}", e))?;
             return Ok(());
         }
-        
+
         // 策略3: 将 \n 替换为 \r\n
         let search_normalized = search.replace("\n", "\r\n");
         if let Some(pos) = content.find(&search_normalized) {
             let end_pos = pos + search_normalized.len();
-            let new_content = format!(
-                "{}{}{}",
-                &content[..pos],
-                replacement,
-                &content[end_pos..]
-            );
-            
-            fs::write(path, new_content)
-                .map_err(|e| anyhow!("写入文件失败: {}", e))?;
+            let new_content = format!("{}{}{}", &content[..pos], replacement, &content[end_pos..]);
+
+            fs::write(path, new_content).map_err(|e| anyhow!("写入文件失败: {}", e))?;
             return Ok(());
         }
-        
+
         // 策略4: 移除所有多余空白字符进行匹配
-        let search_normalized: String = search.chars()
+        let search_normalized: String = search
+            .chars()
             .filter(|c| !c.is_whitespace() || c == &'\n')
             .collect();
-        let content_normalized: String = content.chars()
+        let content_normalized: String = content
+            .chars()
             .filter(|c| !c.is_whitespace() || c == &'\n')
             .collect();
-        
+
         if content_normalized.contains(&search_normalized) {
             return Err(anyhow!(
                 "在文件中未找到精确匹配的内容。建议使用更短的、独特的代码片段进行搜索。"
             ));
         }
-        
+
         // 如果所有策略都失败，返回详细错误
         let error_msg = if search.len() > 100 {
             format!(
@@ -220,36 +205,38 @@ impl FileSystemTool {
         } else {
             format!("在文件中未找到搜索内容: '{}'", search)
         };
-        
+
         Err(anyhow!(error_msg))
     }
-
 
     /// 列出目录内容
     fn list_directory(&self, path: &Path) -> Result<Vec<String>> {
         if Self::needs_confirmation(path) {
-            return Err(anyhow!("路径 '{}' 不在当前工作目录下，需要用户手动同意", path.display()));
+            return Err(anyhow!(
+                "路径 '{}' 不在当前工作目录下，需要用户手动同意",
+                path.display()
+            ));
         }
 
         let mut results = Vec::new();
-        let entries = fs::read_dir(path)
-            .map_err(|e| anyhow!("读取目录失败: {}", e))?;
-        
+        let entries = fs::read_dir(path).map_err(|e| anyhow!("读取目录失败: {}", e))?;
+
         for entry in entries {
             let entry = entry.map_err(|e| anyhow!("读取目录项失败: {}", e))?;
             let path = entry.path();
-            let name = path.file_name()
+            let name = path
+                .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            
+
             if path.is_dir() {
                 results.push(format!("{}/", name));
             } else {
                 results.push(name);
             }
         }
-        
+
         Ok(results)
     }
 }
@@ -258,18 +245,20 @@ impl FileSystemTool {
 impl InternalTool for FileSystemTool {
     async fn call(&self, args: Map<String, Value>) -> Result<CallToolResult> {
         info!("FileSystemTool 调用参数: {:?}", args);
-        
+
         // 解析操作类型
-        let operation = args.get("operation")
+        let operation = args
+            .get("operation")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("缺少 'operation' 参数"))?;
-        
-        let path_str = args.get("path")
+
+        let path_str = args
+            .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("缺少 'path' 参数"))?;
-        
+
         let path = Path::new(path_str);
-        
+
         match operation {
             "read" => {
                 let content = self.read_file(path)?;
@@ -278,7 +267,7 @@ impl InternalTool for FileSystemTool {
                     "content": content,
                     "path": path_str
                 });
-                
+
                 Ok(CallToolResult {
                     content: vec![Annotated::new(
                         RawContent::Text(RawTextContent {
@@ -290,19 +279,20 @@ impl InternalTool for FileSystemTool {
                     is_error: None,
                 })
             }
-            
+
             "write" => {
-                let content = args.get("content")
+                let content = args
+                    .get("content")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow!("写入操作缺少 'content' 参数"))?;
-                
+
                 self.write_file(path, content)?;
                 let result = serde_json::json!({
                     "success": true,
                     "message": format!("文件 '{}' 写入成功", path_str),
                     "path": path_str
                 });
-                
+
                 Ok(CallToolResult {
                     content: vec![Annotated::new(
                         RawContent::Text(RawTextContent {
@@ -314,16 +304,15 @@ impl InternalTool for FileSystemTool {
                     is_error: None,
                 })
             }
-            
+
             "list" => {
-                
                 let entries = self.list_directory(path)?;
                 let result = serde_json::json!({
                     "success": true,
                     "entries": entries,
                     "path": path_str
                 });
-                
+
                 Ok(CallToolResult {
                     content: vec![Annotated::new(
                         RawContent::Text(RawTextContent {
@@ -335,7 +324,7 @@ impl InternalTool for FileSystemTool {
                     is_error: None,
                 })
             }
-            
+
             "check" => {
                 let is_allowed = Self::is_path_allowed(path);
                 let needs_confirmation = Self::needs_confirmation(path);
@@ -346,7 +335,7 @@ impl InternalTool for FileSystemTool {
                     "needs_confirmation": needs_confirmation,
                     "current_directory": Self::get_current_dir().to_string_lossy().to_string()
                 });
-                
+
                 Ok(CallToolResult {
                     content: vec![Annotated::new(
                         RawContent::Text(RawTextContent {
@@ -358,16 +347,18 @@ impl InternalTool for FileSystemTool {
                     is_error: None,
                 })
             }
-            
+
             "modify" => {
-                let search = args.get("search")
+                let search = args
+                    .get("search")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow!("修改操作缺少 'search' 参数"))?;
-                
-                let replacement = args.get("replacement")
+
+                let replacement = args
+                    .get("replacement")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow!("修改操作缺少 'replacement' 参数"))?;
-                
+
                 self.modify_file(path, search, replacement)?;
                 let result = serde_json::json!({
                     "success": true,
@@ -376,7 +367,7 @@ impl InternalTool for FileSystemTool {
                     "search": search,
                     "replacement": replacement
                 });
-                
+
                 Ok(CallToolResult {
                     content: vec![Annotated::new(
                         RawContent::Text(RawTextContent {
@@ -388,10 +379,11 @@ impl InternalTool for FileSystemTool {
                     is_error: None,
                 })
             }
-            
-            _ => {
-                Err(anyhow!("不支持的操作类型: '{}'。支持的操作: read, write, list, check, modify", operation))
-            }
+
+            _ => Err(anyhow!(
+                "不支持的操作类型: '{}'。支持的操作: read, write, list, check, modify",
+                operation
+            )),
         }
     }
 

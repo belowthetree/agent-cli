@@ -1,14 +1,14 @@
 use log::info;
 use ratatui::{
-    widgets::{Block, Borders, Widget},
     style::Stylize,
     text::{Line, Span},
+    widgets::{Block, Borders, Widget},
 };
 
 use crate::tui::get_str_width;
 
 /// 命令提示组件
-/// 
+///
 /// 负责显示和管理命令提示列表，支持翻页和选择
 #[derive(Clone)]
 pub struct CommandSuggestions {
@@ -72,7 +72,7 @@ impl CommandSuggestions {
         if let Some(selected) = self.selected_index {
             if selected < self.commands.len() - 1 {
                 self.selected_index = Some(selected + 1);
-                
+
                 // 如果选中的命令超出了当前显示范围，调整显示起始位置
                 if selected + 1 >= self.display_start + self.max_display {
                     self.display_start = (selected + 1).saturating_sub(self.max_display - 1);
@@ -86,7 +86,7 @@ impl CommandSuggestions {
         if let Some(selected) = self.selected_index {
             if selected > 0 {
                 self.selected_index = Some(selected - 1);
-                
+
                 // 如果选中的命令超出了当前显示范围，调整显示起始位置
                 if selected - 1 < self.display_start {
                     self.display_start = selected - 1;
@@ -97,8 +97,7 @@ impl CommandSuggestions {
 
     /// 获取当前选中的命令
     pub fn get_selected_command(&self) -> Option<&String> {
-        self.selected_index
-            .and_then(|idx| self.commands.get(idx))
+        self.selected_index.and_then(|idx| self.commands.get(idx))
     }
 
     /// 计算当前显示的命令范围
@@ -118,7 +117,8 @@ impl CommandSuggestions {
 impl Widget for &CommandSuggestions {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
-        Self: Sized {
+        Self: Sized,
+    {
         if !self.visible || self.commands.is_empty() {
             return;
         }
@@ -126,7 +126,7 @@ impl Widget for &CommandSuggestions {
         // 计算显示范围
         let (start, end) = self.display_range();
         let display_count = self.display_count();
-        
+
         if display_count == 0 {
             return;
         }
@@ -136,10 +136,10 @@ impl Widget for &CommandSuggestions {
         for i in start..end {
             let cmd = &self.commands[i];
             let is_selected = self.selected_index == Some(i);
-            
+
             // 添加序号前缀
             let prefix = format!("{:2}. ", i + 1);
-            
+
             if is_selected {
                 let mut s = String::from(format!("{}> {}", prefix, cmd));
                 let width = get_str_width(&s);
@@ -151,7 +151,7 @@ impl Widget for &CommandSuggestions {
                     s,
                     ratatui::style::Style::new()
                         .fg(ratatui::style::Color::White)
-                        .bg(ratatui::style::Color::Black)
+                        .bg(ratatui::style::Color::Black),
                 );
                 lines.push(Line::from(span));
             } else {
@@ -161,10 +161,7 @@ impl Widget for &CommandSuggestions {
                     s += " ";
                 }
                 // 未选中的命令：黄色文本
-                let span = Span::styled(
-                    s,
-                    ratatui::style::Style::new().yellow()
-                );
+                let span = Span::styled(s, ratatui::style::Style::new().yellow());
                 lines.push(Line::from(span));
             }
         }
@@ -176,11 +173,15 @@ impl Widget for &CommandSuggestions {
         } else {
             1
         };
-        
+
         let title = if total_pages > 1 {
-            format!("命令提示 ({}/{}) 第{}/{}页", 
-                   display_count, self.commands.len(), 
-                   current_page, total_pages)
+            format!(
+                "命令提示 ({}/{}) 第{}/{}页",
+                display_count,
+                self.commands.len(),
+                current_page,
+                total_pages
+            )
         } else {
             format!("命令提示 ({}/{})", display_count, self.commands.len())
         };
@@ -190,10 +191,9 @@ impl Widget for &CommandSuggestions {
             .title(title)
             .borders(Borders::ALL)
             .style(ratatui::style::Style::new().on_black().light_blue());
-        
-        let paragraph = ratatui::widgets::Paragraph::new(lines)
-            .block(block);
-        
+
+        let paragraph = ratatui::widgets::Paragraph::new(lines).block(block);
+
         paragraph.render(area, buf);
     }
 }

@@ -3,16 +3,16 @@ use std::sync::mpsc;
 use crate::tui::app::{App, ETuiEvent};
 
 mod app;
-mod appevent;
 mod appchat;
+mod appevent;
+mod commands;
+mod perf_monitor;
 mod renderer;
 mod state_manager;
-mod commands;
 mod ui;
-mod perf_monitor;
 
 #[allow(unused_imports)]
-pub use commands::{TuiCommand, CommandRegistry, init_global_registry, global_registry};
+pub use commands::{CommandRegistry, TuiCommand, global_registry, init_global_registry};
 use log::error;
 
 pub async fn run() {
@@ -22,11 +22,11 @@ pub async fn run() {
     ratatui::restore();
 }
 
-pub fn get_char_width(c: char)->u16 {
+pub fn get_char_width(c: char) -> u16 {
     unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16
 }
 
-pub fn get_str_width(s: &str)->u16 {
+pub fn get_str_width(s: &str) -> u16 {
     let mut width = 0;
     for char in s.chars() {
         width += get_char_width(char);

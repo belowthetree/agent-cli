@@ -1,13 +1,13 @@
 use ratatui::{
-    widgets::{Block, Borders, Widget},
     style::Stylize,
     text::{Line, Span},
+    widgets::{Block, Borders, Widget},
 };
 
 use crate::tui::get_str_width;
 
 /// 选项对话框组件
-/// 
+///
 /// 负责显示和管理选项对话框，支持上下键导航和选择
 #[derive(Clone)]
 pub struct OptionDialog {
@@ -66,7 +66,7 @@ impl OptionDialog {
         };
         self.display_start = 0;
         self.visible = !self.options.is_empty();
-        
+
         // 自动计算对话框大小
         self.calculate_size();
         // 自动居中对话框
@@ -86,7 +86,7 @@ impl OptionDialog {
         if let Some(selected) = self.selected_index {
             if selected < self.options.len() - 1 {
                 self.selected_index = Some(selected + 1);
-                
+
                 // 如果选中的选项超出了当前显示范围，调整显示起始位置
                 if selected + 1 >= self.display_start + self.max_display {
                     self.display_start = (selected + 1).saturating_sub(self.max_display - 1);
@@ -100,7 +100,7 @@ impl OptionDialog {
         if let Some(selected) = self.selected_index {
             if selected > 0 {
                 self.selected_index = Some(selected - 1);
-                
+
                 // 如果选中的选项超出了当前显示范围，调整显示起始位置
                 if selected - 1 < self.display_start {
                     self.display_start = selected - 1;
@@ -111,8 +111,7 @@ impl OptionDialog {
 
     /// 获取当前选中的选项
     pub fn get_selected_option(&self) -> Option<&String> {
-        self.selected_index
-            .and_then(|idx| self.options.get(idx))
+        self.selected_index.and_then(|idx| self.options.get(idx))
     }
 
     /// 获取当前选中的选项索引
@@ -143,7 +142,7 @@ impl OptionDialog {
                 max_width = width;
             }
         }
-        
+
         // 添加边框和序号前缀的宽度
         self.width = (max_width + 8).min(80) as u16; // 最大80字符宽
         self.height = (self.options.len().min(self.max_display) + 4).min(20) as u16; // 最大20行高
@@ -155,7 +154,7 @@ impl OptionDialog {
         // 在实际使用中，应该从App获取实际的终端尺寸
         let terminal_width: u16 = 80;
         let terminal_height: u16 = 24;
-        
+
         self.position_x = (terminal_width.saturating_sub(self.width)) / 2;
         self.position_y = (terminal_height.saturating_sub(self.height)) / 2;
     }
@@ -176,7 +175,8 @@ impl OptionDialog {
 impl Widget for &OptionDialog {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
-        Self: Sized {
+        Self: Sized,
+    {
         if !self.visible || self.options.is_empty() {
             return;
         }
@@ -197,31 +197,31 @@ impl Widget for &OptionDialog {
         // 计算显示范围
         let (start, end) = self.display_range();
         let display_count = self.display_count();
-        
+
         if display_count == 0 {
             return;
         }
 
         // 创建选项文本行
         let mut lines: Vec<Line> = Vec::new();
-        
+
         // 添加标题行
         let title_line = Line::from(Span::styled(
             format!(" {} ", self.title),
-            ratatui::style::Style::new().bold().white()
+            ratatui::style::Style::new().bold().white(),
         ));
         lines.push(title_line);
-        
+
         // 添加空行
         lines.push(Line::from(""));
 
         for i in start..end {
             let option = &self.options[i];
             let is_selected = self.selected_index == Some(i);
-            
+
             // 添加序号前缀
             let prefix = format!("{:2}. ", i + 1);
-            
+
             if is_selected {
                 let mut s = String::from(format!("{}> {}", prefix, option));
                 let width = get_str_width(&s);
@@ -234,7 +234,7 @@ impl Widget for &OptionDialog {
                     s,
                     ratatui::style::Style::new()
                         .fg(ratatui::style::Color::White)
-                        .bg(ratatui::style::Color::Blue)
+                        .bg(ratatui::style::Color::Blue),
                 );
                 lines.push(Line::from(span));
             } else {
@@ -245,17 +245,14 @@ impl Widget for &OptionDialog {
                     s += " ";
                 }
                 // 未选中的选项：默认样式
-                let span = Span::styled(
-                    s,
-                    ratatui::style::Style::new().white()
-                );
+                let span = Span::styled(s, ratatui::style::Style::new().white());
                 lines.push(Line::from(span));
             }
         }
 
         // 添加空行
         lines.push(Line::from(""));
-        
+
         // 添加提示行
         let hint_line = Line::from(vec![
             Span::styled("↑/↓", ratatui::style::Style::new().yellow()),
@@ -271,10 +268,9 @@ impl Widget for &OptionDialog {
         let block = Block::default()
             .borders(Borders::ALL)
             .style(ratatui::style::Style::new().on_black().light_blue());
-        
-        let paragraph = ratatui::widgets::Paragraph::new(lines)
-            .block(block);
-        
+
+        let paragraph = ratatui::widgets::Paragraph::new(lines).block(block);
+
         paragraph.render(dialog_area, buf);
     }
 }

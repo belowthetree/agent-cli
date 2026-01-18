@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{Stream, StreamExt, pin_mut};
 
 use crate::chat::StreamedChatResponse;
 
@@ -8,7 +8,9 @@ pub mod chat_client;
 pub mod tool_client;
 
 /// 处理流式响应并输出到标准输出
-pub async fn handle_output(stream: impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_) -> anyhow::Result<()> {
+pub async fn handle_output(
+    stream: impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_,
+) -> anyhow::Result<()> {
     pin_mut!(stream);
     while let Some(result) = stream.next().await {
         match result {
@@ -53,16 +55,18 @@ fn handle_response_item(res: StreamedChatResponse, output: &mut String) {
             print!("{}", formatted);
             output.push_str(&formatted);
         }
-        _ => {},
+        _ => {}
     }
 }
 
 /// 将流式响应收集为字符串
 #[allow(unused)]
-pub async fn get_output_tostring(stream: impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_) -> anyhow::Result<String> {
+pub async fn get_output_tostring(
+    stream: impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_,
+) -> anyhow::Result<String> {
     pin_mut!(stream);
     let mut output = String::new();
-    
+
     while let Some(result) = stream.next().await {
         match result {
             Ok(res) => {
@@ -80,18 +84,18 @@ pub async fn get_output_tostring(stream: impl Stream<Item = Result<StreamedChatR
             }
         }
     }
-    
+
     Ok(output)
 }
 
 /// 处理流式响应并同时收集到字符串
 #[allow(unused)]
 pub async fn handle_and_collect_output(
-    stream: impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_
+    stream: impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + '_,
 ) -> anyhow::Result<(String, anyhow::Result<()>)> {
     pin_mut!(stream);
     let mut output = String::new();
-    
+
     while let Some(result) = stream.next().await {
         match result {
             Ok(res) => {
@@ -107,6 +111,6 @@ pub async fn handle_and_collect_output(
             }
         }
     }
-    
+
     Ok((output, Ok(())))
 }

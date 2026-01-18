@@ -1,12 +1,12 @@
 use crate::connection::{self, CommonConnectionContent};
-use crate::model::param::{ModelInputParam};
 use crate::model::AgentModel;
+use crate::model::param::ModelInputParam;
 use futures::Stream;
-use log::{debug};
-use reqwest::{header, Client};
+use log::debug;
+use reqwest::{Client, header};
 use rmcp::model::JsonObject;
 use serde::{Deserialize, Serialize};
-use serde_json::{json};
+use serde_json::json;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeepseekFunctionItem {
@@ -85,7 +85,10 @@ impl AgentModel for DeepseekModel {
         64000
     }
 
-    async fn chat(&self, param: ModelInputParam) -> Result<Vec<CommonConnectionContent>, anyhow::Error> {
+    async fn chat(
+        &self,
+        param: ModelInputParam,
+    ) -> Result<Vec<CommonConnectionContent>, anyhow::Error> {
         let messages = param.messages;
         let mut tools = Vec::new();
         if let Some(ts) = param.tools {
@@ -97,7 +100,11 @@ impl AgentModel for DeepseekModel {
                     r#type: "function".into(),
                     function: DeepseekFunctionInfo {
                         name: tool.name.clone().into(),
-                        description: tool.description.as_ref().map(|cow| cow.to_string()).unwrap_or_default(),
+                        description: tool
+                            .description
+                            .as_ref()
+                            .map(|cow| cow.to_string())
+                            .unwrap_or_default(),
                         parameters: p,
                     },
                 };
@@ -113,7 +120,12 @@ impl AgentModel for DeepseekModel {
         }))
         .unwrap();
         debug!("{:?}", body);
-        connection::common::DirectConnection::request(format!("{}/chat/completions", self.url), self.get_api_key(), body).await
+        connection::common::DirectConnection::request(
+            format!("{}/chat/completions", self.url),
+            self.get_api_key(),
+            body,
+        )
+        .await
     }
 
     async fn stream_chat(
@@ -132,7 +144,11 @@ impl AgentModel for DeepseekModel {
                     r#type: "function".into(),
                     function: DeepseekFunctionInfo {
                         name: tool.name.clone().into(),
-                        description: tool.description.as_ref().map(|cow| cow.to_string()).unwrap_or_default(),
+                        description: tool
+                            .description
+                            .as_ref()
+                            .map(|cow| cow.to_string())
+                            .unwrap_or_default(),
                         parameters: p,
                     },
                 };
@@ -148,6 +164,10 @@ impl AgentModel for DeepseekModel {
         }))
         .unwrap();
         debug!("{:?}", body);
-        connection::common::SseConnection::stream(format!("{}/chat/completions", self.url), self.get_api_key(), body)
+        connection::common::SseConnection::stream(
+            format!("{}/chat/completions", self.url),
+            self.get_api_key(),
+            body,
+        )
     }
 }

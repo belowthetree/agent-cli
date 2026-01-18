@@ -1,7 +1,7 @@
-use std::borrow::Cow;
-use serde::{Deserialize, Serialize};
-use rmcp::model::Tool;
 use crate::connection::TokenUsage;
+use rmcp::model::Tool;
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 /// 辅助函数用于检查 Cow<'static, str> 是否为空
 fn cow_is_empty(cow: &Cow<'static, str>) -> bool {
@@ -41,7 +41,11 @@ impl ModelMessage {
         think: S2,
         tool_calls: Vec<ToolCall>,
     ) -> Self {
-        let tool_calls = if !tool_calls.is_empty() { Some(tool_calls) } else { None };
+        let tool_calls = if !tool_calls.is_empty() {
+            Some(tool_calls)
+        } else {
+            None
+        };
         Self {
             role: "assistant".into(),
             content: content.into(),

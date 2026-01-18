@@ -1,13 +1,13 @@
 //! 处理 TurnConfirmationResponse 请求的处理器
 
 use super::base_handler::RequestHandler;
-use crate::remote::protocol::{RemoteRequest, RemoteResponse, InputType};
-use crate::config::Config;
 use crate::chat::Chat;
-use tokio_tungstenite::WebSocketStream;
-use tokio::net::TcpStream;
-use log::info;
+use crate::config::Config;
+use crate::remote::protocol::{InputType, RemoteRequest, RemoteResponse};
 use anyhow::Result;
+use log::info;
+use tokio::net::TcpStream;
+use tokio_tungstenite::WebSocketStream;
 
 /// 处理 TurnConfirmationResponse 请求的处理器
 pub struct TurnConfirmationHandler;
@@ -21,73 +21,86 @@ impl RequestHandler for TurnConfirmationHandler {
         _config: &Config,
         ws_stream: &mut WebSocketStream<TcpStream>,
     ) -> RemoteResponse {
-        info!("Handling turn confirmation response request: {}", request.request_id);
-        
+        info!(
+            "Handling turn confirmation response request: {}",
+            request.request_id
+        );
+
         // 检查当前状态是否为 WaitingTurnConfirm
         if chat.get_state() != crate::chat::EChatState::WaitingTurnConfirm {
             return RemoteResponse {
                 request_id: request.request_id,
                 response: crate::remote::protocol::ResponseContent::Text(
-                    "当前不在等待对话轮次确认状态".to_string()
+                    "当前不在等待对话轮次确认状态".to_string(),
                 ),
                 error: Some("不在等待对话轮次确认状态".to_string()),
                 token_usage: None,
             };
         }
-        
+
         // 提取 confirmed 字段
         let confirmed = match &request.input {
-            crate::remote::protocol::InputType::TurnConfirmationResponse { confirmed, reason: _ } => *confirmed,
+            crate::remote::protocol::InputType::TurnConfirmationResponse {
+                confirmed,
+                reason: _,
+            } => *confirmed,
             _ => {
                 return RemoteResponse {
                     request_id: request.request_id,
                     response: crate::remote::protocol::ResponseContent::Text(
-                        "无效的请求类型".to_string()
+                        "无效的请求类型".to_string(),
                     ),
                     error: Some("无效的请求类型".to_string()),
                     token_usage: None,
                 };
             }
         };
-        
+
         if confirmed {
             // 重置对话轮次
             chat.reset_conversation_turn();
             info!("对话轮次已重置");
-            
+
             // 调用 confirm 函数
             chat.confirm();
-            
+
             // 继续处理对话（使用 stream_rechat）
             info!("继续处理对话");
-            let result = self.continue_conversation_with_ws(ws_stream, chat, &request.request_id).await;
-            
+            let result = self
+                .continue_conversation_with_ws(ws_stream, chat, &request.request_id)
+                .await;
+
             match result {
                 Ok(mut response) => {
                     // Set the correct request ID
                     response.request_id = request.request_id;
                     response
                 }
-                Err(e) => RemoteResponse::error(&request.request_id, &format!("继续对话处理错误: {}", e)),
+                Err(e) => {
+                    RemoteResponse::error(&request.request_id, &format!("继续对话处理错误: {}", e))
+                }
             }
         } else {
             // 用户不确认重置，只调用 confirm 函数将状态改回 Idle
             chat.confirm();
             info!("用户取消对话轮次重置，状态已恢复");
-            
+
             RemoteResponse {
                 request_id: request.request_id,
                 response: crate::remote::protocol::ResponseContent::Text(
-                    "对话轮次重置已取消，对话将保持当前状态".to_string()
+                    "对话轮次重置已取消，对话将保持当前状态".to_string(),
                 ),
                 error: None,
                 token_usage: None,
             }
         }
     }
-    
+
     fn can_handle(&self, request: &RemoteRequest) -> bool {
-        matches!(&request.input, crate::remote::protocol::InputType::TurnConfirmationResponse { .. })
+        matches!(
+            &request.input,
+            crate::remote::protocol::InputType::TurnConfirmationResponse { .. }
+        )
     }
 }
 
@@ -102,26 +115,26 @@ impl TurnConfirmationHandler {
         // 使用共享模块中的函数，但我们需要一个专门用于继续对话的函数
         // 或者我们可以重用 process_streaming_chat_with_ws，但传入空输入
         // 实际上，我们需要调用 stream_rechat 而不是 stream_chat
-        
+
         // 创建一个通道来接收聊天流的结果
         use crate::chat::StreamedChatResponse;
         use futures::{SinkExt, StreamExt};
-        use tokio_tungstenite::tungstenite::Message;
         use tokio::sync::mpsc;
-        
+        use tokio_tungstenite::tungstenite::Message;
+
         let mut tool_errors = Vec::new();
         let cancel_token = chat.get_cancel_token();
-        
+
         let (tx, mut rx) = mpsc::channel::<Result<StreamedChatResponse, anyhow::Error>>(32);
 
         let mut chat_clone = chat.clone();
-        
+
         // 创建一个单独的任务来处理聊天流（使用 stream_rechat）
         let chat_task = tokio::spawn(async move {
             {
                 let stream = chat_clone.stream_rechat();
                 futures::pin_mut!(stream);
-                
+
                 while let Some(result) = stream.next().await {
                     // 发送结果到通道
                     if tx.send(result).await.is_err() {
@@ -133,11 +146,11 @@ impl TurnConfirmationHandler {
             info!("继续对话流任务完成");
             chat_clone
         });
-        
+
         // 使用 tokio::select! 同时监听聊天流结果和 WebSocket 消息
         let mut chat_task_completed = false;
         let mut interrupted = false;
-        
+
         loop {
             tokio::select! {
                 // 从通道接收聊天流结果
@@ -208,7 +221,7 @@ impl TurnConfirmationHandler {
                                     // 尝试将二进制数据解析为 JSON 字符串
                                     if let Ok(text) = String::from_utf8(data) {
                                         info!("Received binary WebSocket message during streaming chat processing: {}", text);
-                                        
+
                                         if let Ok(request) = serde_json::from_str::<RemoteRequest>(&text) {
                                             if let InputType::Interrupt = &request.input {
                                                 // 收到 interrupt，但不立即取消聊天流
@@ -252,25 +265,25 @@ impl TurnConfirmationHandler {
                     }
                 }
             }
-            
+
             // 如果聊天任务已完成，退出循环
             if chat_task_completed {
                 break;
             }
         }
-        
+
         // 等待聊天任务完成（如果还没有完成）
         let returned_chat = if !chat_task_completed {
             chat_task.await.ok()
         } else {
             None
         };
-        
+
         // 如果任务返回了修改后的 chat_clone，将其赋值回原始 chat
         if let Some(returned_chat) = returned_chat {
             *chat = returned_chat;
         }
-        
+
         // 发送工具确认协议
         if chat.get_state() == crate::chat::EChatState::WaitingToolConfirm {
             // Get the last tool call from context
@@ -278,23 +291,25 @@ impl TurnConfirmationHandler {
                 if let Some(tool_calls) = &last_msg.tool_calls {
                     if let Some(tool_call) = tool_calls.first() {
                         // Parse arguments string to JSON value
-                        let arguments: serde_json::Value = match serde_json::from_str(&tool_call.function.arguments) {
-                            Ok(args) => args,
-                            Err(e) => {
-                                // If parsing fails, create an empty object
-                                log::warn!("Failed to parse tool arguments as JSON: {}", e);
-                                serde_json::json!({})
-                            }
-                        };
-                        
+                        let arguments: serde_json::Value =
+                            match serde_json::from_str(&tool_call.function.arguments) {
+                                Ok(args) => args,
+                                Err(e) => {
+                                    // If parsing fails, create an empty object
+                                    log::warn!("Failed to parse tool arguments as JSON: {}", e);
+                                    serde_json::json!({})
+                                }
+                            };
+
                         // Return a tool confirmation request
                         return Ok(RemoteResponse {
                             request_id: String::new(), // Will be replaced by caller
-                            response: crate::remote::protocol::ResponseContent::ToolConfirmationRequest {
-                                name: tool_call.function.name.clone(),
-                                arguments,
-                                description: None,
-                            },
+                            response:
+                                crate::remote::protocol::ResponseContent::ToolConfirmationRequest {
+                                    name: tool_call.function.name.clone(),
+                                    arguments,
+                                    description: None,
+                                },
                             error: None,
                             token_usage: None,
                         });
@@ -302,25 +317,31 @@ impl TurnConfirmationHandler {
                 }
             }
         }
-        
+
         // 发送对话轮次确认协议（如果再次超过限制）
         if chat.get_state() == crate::chat::EChatState::WaitingTurnConfirm {
             let (current_turns, max_turns) = chat.get_conversation_turn_info();
-            info!("发送对话轮次确认请求: 当前轮次={}, 最大轮次={}", current_turns, max_turns);
-            
+            info!(
+                "发送对话轮次确认请求: 当前轮次={}, 最大轮次={}",
+                current_turns, max_turns
+            );
+
             // Return a turn confirmation request
             return Ok(RemoteResponse {
                 request_id: String::new(), // Will be replaced by caller
                 response: crate::remote::protocol::ResponseContent::TurnConfirmationRequest {
                     current_turns,
                     max_turns,
-                    reason: Some(format!("已达到最大对话轮次限制 ({} 轮)。是否重置对话轮次以继续对话？", max_turns)),
+                    reason: Some(format!(
+                        "已达到最大对话轮次限制 ({} 轮)。是否重置对话轮次以继续对话？",
+                        max_turns
+                    )),
                 },
                 error: None,
                 token_usage: None,
             });
         }
-        
+
         // token 使用情况
         use crate::remote::protocol::TokenUsage;
         let token_usage = chat.context().last().and_then(|last_msg| {
@@ -330,7 +351,7 @@ impl TurnConfirmationHandler {
                 total_tokens: usage.total_tokens,
             })
         });
-        
+
         // If there are tool errors, return a tool error response
         if !tool_errors.is_empty() {
             // For now, return the first tool error

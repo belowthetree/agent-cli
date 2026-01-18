@@ -2,7 +2,7 @@
 //!
 //! 实现 Agent trait，将 agent-cli 的功能暴露为 ACP 服务
 
-use agent_client_protocol::{self as acp, Client, TextContent};
+use agent_client_protocol::{self as acp, TextContent};
 use async_trait::async_trait;
 use futures::{StreamExt, pin_mut};
 use log::{debug, error, info, warn};
@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc, oneshot};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -20,7 +19,8 @@ use crate::config::Config;
 use crate::mcp::get_config_tools;
 
 /// 会话更新发送器
-type SessionUpdateSender = mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>;
+pub type SessionUpdateSender =
+    mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>;
 
 /// 会话数据
 #[derive(Clone)]
@@ -116,6 +116,7 @@ impl AcpAgent {
         let mut current_text = String::new();
 
         while let Some(result) = stream.next().await {
+            info!("{:?}", result);
             match result {
                 Ok(response) => {
                     match response {
@@ -382,76 +383,4 @@ impl acp::Agent for AcpAgent {
         );
         Ok(())
     }
-}
-
-/// 运行 ACP Agent (stdio 模式)
-pub async fn run_stdio_agent(server_name: String, server_version: String) -> anyhow::Result<()> {
-    // 在 LocalSet 外面创建 Config，避免 Send/Sync 约束问题
-    let config = Config::local().map_err(|e| anyhow::anyhow!("加载配置失败: {}", e))?;
-
-    // 创建会话更新通道
-    let (session_update_tx, mut session_update_rx) = mpsc::unbounded_channel();
-
-    let agent = AcpAgent::new(server_name, server_version, config, session_update_tx);
-
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-
-    // 使用 LocalSet 来运行非 Send 的 future
-    let local_set = tokio::task::LocalSet::new();
-
-    local_set
-        .run_until(async move {
-            // 创建连接
-            let (conn, handle_io) = acp::AgentSideConnection::new(
-                agent,
-                stdout.compat_write(), // outgoing: 写入响应到 stdout
-                stdin.compat(),        // incoming: 从 stdin 读取请求
-                |fut| {
-                    tokio::task::spawn_local(fut);
-                },
-            );
-
-            // 克隆 conn 用于后台任务
-            let conn_clone = conn;
-
-            // 启动后台任务处理会话通知
-            tokio::task::spawn_local(async move {
-                info!("启动会话通知处理任务");
-
-                while let Some((session_notification, tx)) = session_update_rx.recv().await {
-                    debug!("发送会话通知: {:?}", session_notification);
-
-                    match conn_clone.session_notification(session_notification).await {
-                        Ok(_) => {
-                            // 通知发送完成
-                            tx.send(()).ok();
-                        }
-                        Err(e) => {
-                            error!("发送会话通知失败: {}", e);
-                            tx.send(()).ok();
-                            break;
-                        }
-                    }
-                }
-
-                info!("会话通知处理任务结束");
-            });
-
-            // 在另一个任务中处理 I/O
-            tokio::task::spawn_local(async move {
-                if let Err(e) = handle_io.await {
-                    error!("ACP Agent I/O 错误: {}", e);
-                }
-            });
-
-            // 等待 Ctrl+C 信号
-            tokio::signal::ctrl_c().await?;
-            info!("收到 Ctrl+C 信号，退出 ACP Agent");
-
-            Ok::<(), anyhow::Error>(())
-        })
-        .await?;
-
-    Ok(())
 }

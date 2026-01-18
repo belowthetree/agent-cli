@@ -1,5 +1,5 @@
 use async_stream::stream;
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{Stream, StreamExt, pin_mut};
 use log::info;
 
 use crate::chat::Chat;
@@ -82,7 +82,7 @@ impl ChatStream {
     ) -> impl Stream<Item = Result<StreamedChatResponse, anyhow::Error>> + 'a {
         state.add_message(ModelMessage::user(prompt.to_string()));
         let cancel_token = state.get_cancel_token();
-        
+
         stream! {
             loop {
                 let mut msg = ModelMessage::assistant("", "", vec![]);

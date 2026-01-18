@@ -1,5 +1,5 @@
+use chrono::{DateTime, Local};
 use std::env;
-use chrono::{Local, DateTime};
 
 pub const CHAT_PROMPT: &'static str = "```markdown
 # TODO LIST RECOMMENDED
@@ -49,15 +49,15 @@ pub fn build_enhanced_prompt(base_prompt: &str) -> String {
     // 获取当前时间
     let now: DateTime<Local> = Local::now();
     let formatted_time = now.format("%Y-%m-%d %H:%M:%S").to_string();
-    
+
     // 获取当前工作目录
     let current_dir = env::current_dir()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|_| "无法获取当前目录".to_string());
-    
+
     // 获取系统信息
     let os_info = get_system_info();
-    
+
     // 构建增强的prompt
     format!(
         "{}\n当前时间: {}\n当前工作目录: {}\n\n{}",

@@ -1,8 +1,8 @@
 use crate::chat::{Chat, StreamedChatResponse};
 use crate::client::tool_client;
 use crate::model::param::{ModelMessage, ToolCall};
-use futures::{Stream, pin_mut};
 use futures::StreamExt;
+use futures::{Stream, pin_mut};
 use log::info;
 
 /// Chat 工具调用处理模块
@@ -10,7 +10,10 @@ use log::info;
 pub struct ChatTools;
 
 impl ChatTools {
-    pub fn handle_stream_tool(chat: &mut Chat, cancel_token: tokio_util::sync::CancellationToken)-> impl Stream<Item = anyhow::Result<StreamedChatResponse>> + '_ {
+    pub fn handle_stream_tool(
+        chat: &mut Chat,
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> impl Stream<Item = anyhow::Result<StreamedChatResponse>> + '_ {
         async_stream::stream! {
             // 处理工具调用
             let tool_calls = chat.state.get_tool_calls();

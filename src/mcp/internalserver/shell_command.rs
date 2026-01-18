@@ -1,10 +1,10 @@
-use std::time::Duration;
-use std::path::Path;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use log::info;
 use rmcp::model::{Annotated, CallToolResult, RawContent, RawTextContent, Tool};
 use serde_json::{Map, Value};
-use anyhow::{anyhow, Result};
+use std::path::Path;
+use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
 
@@ -41,7 +41,7 @@ impl ShellCommandTool {
         // 检查是否包含过多的管道和重定向，防止复杂命令
         let pipe_count = command.matches('|').count();
         let redirect_count = command.matches('>').count() + command.matches('<').count();
-        
+
         if pipe_count > 5 || redirect_count > 5 {
             return Err(anyhow!("命令过于复杂，包含过多管道或重定向操作"));
         }
@@ -50,7 +50,12 @@ impl ShellCommandTool {
     }
 
     /// 执行shell命令
-    async fn execute_command(&self, cmd_str: &str, working_dir: Option<&str>, timeout_sec: u64) -> Result<String> {
+    async fn execute_command(
+        &self,
+        cmd_str: &str,
+        working_dir: Option<&str>,
+        timeout_sec: u64,
+    ) -> Result<String> {
         // 验证命令安全性
         Self::validate_command(cmd_str)?;
 
@@ -73,38 +78,29 @@ impl ShellCommandTool {
         }
 
         // 设置超时并执行命令
-        let result = timeout(
-            Duration::from_secs(timeout_sec),
-            command.output()
-        ).await;
+        let result = timeout(Duration::from_secs(timeout_sec), command.output()).await;
 
         match result {
-            Ok(output_result) => {
-                match output_result {
-                    Ok(output) => {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        let exit_code = output.status.code().unwrap_or(-1);
+            Ok(output_result) => match output_result {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let exit_code = output.status.code().unwrap_or(-1);
 
-                        let result = serde_json::json!({
-                            "success": true,
-                            "exit_code": exit_code,
-                            "stdout": stdout.to_string(),
-                            "stderr": stderr.to_string(),
-                            "command": cmd_str,
-                            "working_dir": working_dir.unwrap_or(std::env::current_dir().unwrap().to_string_lossy().as_ref())
-                        });
+                    let result = serde_json::json!({
+                        "success": true,
+                        "exit_code": exit_code,
+                        "stdout": stdout.to_string(),
+                        "stderr": stderr.to_string(),
+                        "command": cmd_str,
+                        "working_dir": working_dir.unwrap_or(std::env::current_dir().unwrap().to_string_lossy().as_ref())
+                    });
 
-                        Ok(result.to_string())
-                    }
-                    Err(e) => {
-                        Err(anyhow!("命令执行失败: {}", e))
-                    }
+                    Ok(result.to_string())
                 }
-            }
-            Err(_) => {
-                Err(anyhow!("命令执行超时 ({}秒)", timeout_sec))
-            }
+                Err(e) => Err(anyhow!("命令执行失败: {}", e)),
+            },
+            Err(_) => Err(anyhow!("命令执行超时 ({}秒)", timeout_sec)),
         }
     }
 }
@@ -113,19 +109,17 @@ impl ShellCommandTool {
 impl InternalTool for ShellCommandTool {
     async fn call(&self, args: Map<String, Value>) -> Result<CallToolResult> {
         info!("ShellCommandTool 调用参数: {:?}", args);
-        
+
         // 解析命令参数
-        let command = args.get("command")
+        let command = args
+            .get("command")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("缺少 'command' 参数"))?;
-        
+
         // 解析可选参数
-        let working_dir = args.get("working_dir")
-            .and_then(|v| v.as_str());
-        
-        let timeout_sec = args.get("timeout")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(30); // 默认30秒超时
+        let working_dir = args.get("working_dir").and_then(|v| v.as_str());
+
+        let timeout_sec = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(30); // 默认30秒超时
 
         // 验证超时时间范围
         if timeout_sec == 0 || timeout_sec > 300 {
@@ -133,13 +127,13 @@ impl InternalTool for ShellCommandTool {
         }
 
         // 执行命令
-        let result = self.execute_command(command, working_dir, timeout_sec).await?;
-        
+        let result = self
+            .execute_command(command, working_dir, timeout_sec)
+            .await?;
+
         Ok(CallToolResult {
             content: vec![Annotated::new(
-                RawContent::Text(RawTextContent {
-                    text: result,
-                }),
+                RawContent::Text(RawTextContent { text: result }),
                 None,
             )],
             structured_content: None,
@@ -150,7 +144,9 @@ impl InternalTool for ShellCommandTool {
     fn get_mcp_tool(&self) -> Tool {
         Tool {
             name: "shell_command".into(),
-            description: Some("执行shell命令的工具。支持在指定工作目录执行命令，具有安全验证和超时控制。".into()),
+            description: Some(
+                "执行shell命令的工具。支持在指定工作目录执行命令，具有安全验证和超时控制。".into(),
+            ),
             input_schema: serde_json::from_str(
                 r#"
 {
@@ -173,9 +169,12 @@ impl InternalTool for ShellCommandTool {
     },
     "required": ["command"]
 }
-"#).unwrap(),
-            output_schema: Some(serde_json::from_str(
-                r#"
+"#,
+            )
+            .unwrap(),
+            output_schema: Some(
+                serde_json::from_str(
+                    r#"
 {
     "type": "object",
     "properties": {
@@ -206,7 +205,10 @@ impl InternalTool for ShellCommandTool {
     },
     "required": ["success", "exit_code", "stdout", "stderr", "command", "working_dir"]
 }
-"#).unwrap()),
+"#,
+                )
+                .unwrap(),
+            ),
             annotations: None,
         }
     }

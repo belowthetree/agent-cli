@@ -64,26 +64,28 @@ impl McpServerTransportConfig {
                     .stdin(std::process::Stdio::piped())
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped());
-                
+
                 let mut child = cmd.spawn()?;
-                
+
                 // 手动获取stdin/stdout管道
-                let stdout = child.stdout.take().ok_or_else(|| {
-                    anyhow::anyhow!("stdout was not captured")
-                })?;
-                
-                let stdin = child.stdin.take().ok_or_else(|| {
-                    anyhow::anyhow!("stdin was not captured")
-                })?;
-                
+                let stdout = child
+                    .stdout
+                    .take()
+                    .ok_or_else(|| anyhow::anyhow!("stdout was not captured"))?;
+
+                let stdin = child
+                    .stdin
+                    .take()
+                    .ok_or_else(|| anyhow::anyhow!("stdin was not captured"))?;
+
                 // 创建自定义的transport
                 let transport = rmcp::transport::async_rw::AsyncRwTransport::new(stdout, stdin);
-                
+
                 // 保存子进程引用以便后续管理
                 tokio::spawn(async move {
                     let _ = child.wait().await;
                 });
-                
+
                 ().serve(transport).await?
             }
         };
@@ -153,15 +155,18 @@ impl Config {
                 return path;
             }
         }
-        
+
         #[cfg(target_os = "macos")]
         {
             if let Some(home) = std::env::var_os("HOME") {
-                let path = PathBuf::from(home).join("Library").join("Application Support").join("agent-cli");
+                let path = PathBuf::from(home)
+                    .join("Library")
+                    .join("Application Support")
+                    .join("agent-cli");
                 return path;
             }
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             if let Some(home) = std::env::var_os("HOME") {
@@ -169,17 +174,17 @@ impl Config {
                 return path;
             }
         }
-        
+
         // 如果无法获取标准路径，回退到当前目录
         PathBuf::from(".")
     }
-    
+
     fn get_config_paths(acp: bool) -> (PathBuf, PathBuf) {
         // 返回两个路径：(检查路径, 创建路径)
         let config_dir = Self::get_standard_config_dir();
         let local_config = PathBuf::from("config.json");
         let app_config = config_dir.join("config.json");
-        
+
         // 优先检查当前目录的配置
         if !acp && local_config.exists() {
             (local_config, app_config)
@@ -187,14 +192,14 @@ impl Config {
             (app_config.clone(), app_config)
         }
     }
-    
+
     pub fn local() -> Result<Self, Box<dyn std::error::Error>> {
         Self::local_with_acp_mode(false)
     }
 
     pub fn local_with_acp_mode(is_acp_mode: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let (config_path, create_path) = Self::get_config_paths(is_acp_mode);
-        
+
         // 检查配置文件是否存在
         if !config_path.exists() {
             info!("创建配置 {}", is_acp_mode);
@@ -206,11 +211,11 @@ impl Config {
                 return Self::create_default_config(&create_path);
             }
         }
-        
+
         // 读取配置文件
         let config_content = fs::read_to_string(&config_path)?;
         let mut config_file: Self = serde_json::from_str(&config_content)?;
-        
+
         // 验证和补全配置字段
         if is_acp_mode {
             // ACP 模式：不询问用户，直接使用默认值补全缺失配置
@@ -218,13 +223,13 @@ impl Config {
         } else {
             config_file = Self::validate_and_complete_config(config_file, &create_path)?;
         }
-        
+
         Ok(config_file)
     }
-    
+
     fn create_default_config(config_path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         info!("=== 配置文件初始化 ===");
-        
+
         // 确保配置目录存在
         if let Some(parent) = config_path.parent() {
             if !parent.exists() {
@@ -232,12 +237,12 @@ impl Config {
                 println!("配置目录已创建: {}", parent.display());
             }
         }
-        
+
         // 获取必要的配置信息
         let api_key = Self::prompt_user_input("请输入API密钥（必填）: ")?;
         let url = Self::prompt_user_input_optional("请输入API URL（可选，按Enter跳过）: ")?;
         let model = Self::prompt_user_input_optional("请输入模型名称（可选，按Enter跳过）: ")?;
-        
+
         // 创建默认配置
         let config = Config {
             mcp: None,
@@ -253,19 +258,21 @@ impl Config {
             prompt: None,
             envs: Vec::new(),
         };
-        
+
         // 保存配置文件
         let config_json = serde_json::to_string_pretty(&config)?;
         fs::write(config_path, config_json)?;
-        
+
         println!("配置文件已创建: {}", config_path.display());
         Ok(config)
     }
 
     /// 为 ACP 模式创建默认配置（不询问用户）
-    fn create_default_config_for_acp(config_path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    fn create_default_config_for_acp(
+        config_path: &PathBuf,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         info!("=== ACP 模式：创建默认配置文件 ===");
-        
+
         // 确保配置目录存在
         if let Some(parent) = config_path.parent() {
             if !parent.exists() {
@@ -273,7 +280,7 @@ impl Config {
                 info!("配置目录已创建: {}", parent.display());
             }
         }
-        
+
         // 创建默认配置（使用空字符串作为占位符）
         let config = Config {
             mcp: None,
@@ -289,11 +296,11 @@ impl Config {
             prompt: None,
             envs: Vec::new(),
         };
-        
+
         // 保存配置文件
         let config_json = serde_json::to_string_pretty(&config)?;
         fs::write(config_path, config_json)?;
-        
+
         info!("配置文件已创建: {}", config_path.display());
         Ok(config)
     }
@@ -304,78 +311,81 @@ impl Config {
         if config.max_tool_try == 0 {
             config.max_tool_try = max_tool_try_default();
         }
-        
+
         if config.max_context_num == 0 {
             config.max_context_num = max_context_num_default();
         }
-        
+
         if config.max_tokens.is_none() {
             config.max_tokens = max_tokens_default();
         }
-        
+
         config
     }
-    
-    fn validate_and_complete_config(mut config: Self, config_path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+
+    fn validate_and_complete_config(
+        mut config: Self,
+        config_path: &PathBuf,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut needs_save = false;
-        
+
         // 验证必填字段
         if config.api_key.is_empty() {
             println!("API密钥缺失，需要重新输入");
             config.api_key = Self::prompt_user_input("请输入API密钥: ")?;
             needs_save = true;
         }
-        
+
         // 设置默认值
         if config.max_tool_try == 0 {
             config.max_tool_try = max_tool_try_default();
             needs_save = true;
         }
-        
+
         if config.max_context_num == 0 {
             config.max_context_num = max_context_num_default();
             needs_save = true;
         }
-        
+
         if config.max_tokens.is_none() {
             config.max_tokens = max_tokens_default();
             needs_save = true;
         }
-        
+
         // 如果需要保存，更新配置文件
         if needs_save {
             let config_json = serde_json::to_string_pretty(&config)?;
             fs::write(config_path, config_json)?;
             println!("配置文件已更新: {}", config_path.display());
         }
-        
+
         Ok(config)
     }
-    
+
     fn prompt_user_input(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
         loop {
             print!("{}", prompt);
             io::stdout().flush()?;
-            
+
             let mut input = String::new();
             io::stdin().read_line(&mut input)?;
-            
+
             let input = input.trim().to_string();
             if !input.is_empty() {
                 return Ok(input);
             }
-            
+
             println!("输入不能为空，请重新输入");
         }
     }
-    
+
     fn prompt_user_input_optional(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
         print!("{}", prompt);
         io::stdout().flush()?;
-        
+
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        
+
         Ok(input.trim().to_string())
     }
 }

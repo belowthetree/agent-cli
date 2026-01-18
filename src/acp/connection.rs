@@ -6,7 +6,7 @@ use agent_client_protocol::{self as acp, Client};
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
@@ -102,7 +102,7 @@ impl AcpConnection for StdioConnection {
                     info!("启动会话通知处理任务");
 
                     while let Some((session_notification, tx)) = session_update_rx.recv().await {
-                        debug!("发送会话通知: {:?}", session_notification);
+                        info!("发送会话通知: {:?}", session_notification);
 
                         match conn_clone.session_notification(session_notification).await {
                             Ok(_) => {
@@ -157,7 +157,11 @@ impl WssConnection {
         server_name: String,
         server_version: String,
     ) -> Result<()> {
-        info!("新的 WebSocket 连接");
+        let peer_addr = stream
+            .peer_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        info!("新的 WebSocket 连接来自: {}", peer_addr);
 
         // 接受 WebSocket 连接
         let ws_stream = match accept_async(stream).await {
@@ -168,7 +172,7 @@ impl WssConnection {
             }
         };
 
-        info!("WebSocket 连接已建立");
+        info!("WebSocket 连接已建立，来自: {}", peer_addr);
 
         // 处理 WebSocket 连接
         self.process_websocket(ws_stream, config, server_name, server_version)
@@ -183,7 +187,7 @@ impl WssConnection {
         server_name: String,
         server_version: String,
     ) -> Result<()> {
-        let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+        let (ws_sender, mut ws_receiver) = ws_stream.split();
 
         // 创建会话更新通道
         let (session_update_tx, mut session_update_rx) = mpsc::unbounded_channel();
@@ -196,28 +200,53 @@ impl WssConnection {
         let (ws_to_acp_tx, ws_to_acp_rx) = mpsc::unbounded_channel::<String>();
 
         // 启动从 ACP 到 WebSocket 的转发任务
-        let acp_to_ws_task = tokio::task::spawn_local(async move {
+        let mut ws_sender_clone = ws_sender;
+        let acp_to_ws_task = tokio::spawn(async move {
+            info!("ACP -> WebSocket 转发任务启动");
             while let Some(message) = acp_to_ws_rx.recv().await {
-                info!("{:?}", message);
-                if let Err(e) = ws_sender.send(Message::Text(message)).await {
+                info!(
+                    "ACP -> WebSocket: 发送消息，长度: {}, 内容: {}...",
+                    message.len(),
+                    &message[..std::cmp::min(100, message.len())]
+                );
+                if let Err(e) = ws_sender_clone.send(Message::Text(message)).await {
                     error!("发送 WebSocket 消息失败: {}", e);
                     break;
                 }
             }
+            info!("ACP -> WebSocket 转发任务结束");
         });
 
         // 启动从 WebSocket 到 ACP 的转发任务
-        let ws_to_acp_task = tokio::task::spawn_local(async move {
+        let ws_to_acp_task = tokio::spawn(async move {
+            info!("WebSocket -> ACP 转发任务启动");
             while let Some(message) = ws_receiver.next().await {
-                info!("{:?}", message);
                 match message {
                     Ok(Message::Text(text)) => {
+                        info!(
+                            "WebSocket -> ACP: 收到文本消息，长度: {}, 完整内容: {}",
+                            text.len(),
+                            text
+                        );
                         if let Err(e) = ws_to_acp_tx.send(text) {
                             error!("转发到 ACP 失败: {}", e);
                             break;
                         }
                     }
+                    Ok(Message::Binary(data)) => {
+                        info!("WebSocket -> ACP: 收到二进制消息，长度: {}", data.len());
+                        // 将二进制数据转换为字符串
+                        if let Ok(text) = String::from_utf8(data) {
+                            if let Err(e) = ws_to_acp_tx.send(text) {
+                                error!("转发到 ACP 失败: {}", e);
+                                break;
+                            }
+                        } else {
+                            warn!("无法将二进制数据转换为UTF-8字符串");
+                        }
+                    }
                     Ok(Message::Close(_)) => {
+                        info!("WebSocket 连接关闭");
                         break;
                     }
                     Err(e) => {
@@ -225,10 +254,11 @@ impl WssConnection {
                         break;
                     }
                     _ => {
-                        info!("其他类型的消息");
+                        info!("忽略其他类型的 WebSocket 消息");
                     }
                 }
             }
+            info!("WebSocket -> ACP 转发任务结束");
         });
 
         // 创建自定义的读写器
@@ -236,9 +266,12 @@ impl WssConnection {
         let incoming = UnboundedReceiverReader::new(ws_to_acp_rx);
 
         // 创建 ACP 连接
+        info!("创建 ACP 连接...");
         let (conn, handle_io) = acp::AgentSideConnection::new(agent, outgoing, incoming, |fut| {
+            info!("启动 ACP 处理任务");
             tokio::task::spawn_local(fut);
         });
+        info!("ACP 连接创建成功");
 
         // 克隆 conn 用于后台任务
         let conn_clone = conn;
@@ -248,7 +281,7 @@ impl WssConnection {
             info!("启动 WebSocket 会话通知处理任务");
 
             while let Some((session_notification, tx)) = session_update_rx.recv().await {
-                debug!("发送会话通知: {:?}", session_notification);
+                info!("发送会话通知: {:?}", session_notification);
 
                 match conn_clone.session_notification(session_notification).await {
                     Ok(_) => {
@@ -349,42 +382,51 @@ impl AcpConnection for WssConnection {
 /// 无界发送器写入器，实现 futures::AsyncWrite 接口
 struct UnboundedSenderWriter {
     sender: mpsc::UnboundedSender<String>,
-    buffer: Vec<u8>,
 }
 
 impl UnboundedSenderWriter {
     fn new(sender: mpsc::UnboundedSender<String>) -> Self {
-        Self {
-            sender,
-            buffer: Vec::new(),
-        }
+        Self { sender }
     }
 }
 
 impl futures::AsyncWrite for UnboundedSenderWriter {
     fn poll_write(
-        mut self: std::pin::Pin<&mut Self>,
+        self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        self.buffer.extend_from_slice(buf);
+        // 立即发送数据，而不是缓冲
+        let text = String::from_utf8_lossy(buf).to_string();
+        info!(
+            "UnboundedSenderWriter: 收到 {} 字节数据，内容: {}...",
+            buf.len(),
+            &text[..std::cmp::min(100, text.len())]
+        );
+
+        // 检查是否是完整的JSON-RPC消息
+        if text.trim().is_empty() {
+            info!("UnboundedSenderWriter: 忽略空消息");
+            return std::task::Poll::Ready(Ok(buf.len()));
+        }
+
+        if let Err(e) = self.sender.send(text) {
+            error!("UnboundedSenderWriter: 发送失败: {}", e);
+            return std::task::Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )));
+        }
+        info!("UnboundedSenderWriter: 消息已发送到通道");
         std::task::Poll::Ready(Ok(buf.len()))
     }
 
     fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
+        self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        if !self.buffer.is_empty() {
-            let text = String::from_utf8_lossy(&self.buffer).to_string();
-            if let Err(e) = self.sender.send(text) {
-                return std::task::Poll::Ready(Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )));
-            }
-            self.buffer.clear();
-        }
+        // 由于数据已经立即发送，flush不需要做任何事情
+        info!("UnboundedSenderWriter: flush");
         std::task::Poll::Ready(Ok(()))
     }
 
@@ -392,6 +434,7 @@ impl futures::AsyncWrite for UnboundedSenderWriter {
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
+        info!("UnboundedSenderWriter: close");
         std::task::Poll::Ready(Ok(()))
     }
 }
@@ -421,34 +464,57 @@ impl futures::AsyncRead for UnboundedReceiverReader {
     ) -> std::task::Poll<std::io::Result<usize>> {
         // 如果缓冲区有数据，先返回缓冲区的内容
         if self.pos < self.buffer.len() {
-            info!("poll read");
             let available = self.buffer.len() - self.pos;
             let len = std::cmp::min(buf.len(), available);
             buf[..len].copy_from_slice(&self.buffer[self.pos..self.pos + len]);
             self.pos += len;
+
+            // 如果已经读取完所有数据，清空缓冲区
+            if self.pos >= self.buffer.len() {
+                self.buffer.clear();
+                self.pos = 0;
+            }
+
+            info!("UnboundedReceiverReader: 从缓冲区读取 {} 字节", len);
             return std::task::Poll::Ready(Ok(len));
         }
 
-        // 重置缓冲区位置
-        self.buffer.clear();
-        self.pos = 0;
-
         // 从接收器获取新数据
-        info!("poll read");
         match self.receiver.poll_recv(cx) {
             std::task::Poll::Ready(Some(text)) => {
-                info!("poll read {}", text);
-                self.buffer.extend_from_slice(text.as_bytes());
+                info!(
+                    "UnboundedReceiverReader: 收到完整消息，长度: {}",
+                    text.len()
+                );
+
+                // 添加换行符，因为ACP可能期望消息以换行符结束
+                let mut full_message = text;
+                if !full_message.ends_with('\n') {
+                    full_message.push('\n');
+                }
+
+                self.buffer.extend_from_slice(full_message.as_bytes());
                 let len = std::cmp::min(buf.len(), self.buffer.len());
                 buf[..len].copy_from_slice(&self.buffer[..len]);
                 self.pos = len;
+
+                // 如果还有剩余数据，留在缓冲区中
+                if self.pos >= self.buffer.len() {
+                    self.buffer.clear();
+                    self.pos = 0;
+                }
+
+                info!("UnboundedReceiverReader: 返回 {} 字节给调用者", len);
                 std::task::Poll::Ready(Ok(len))
             }
             std::task::Poll::Ready(None) => {
-                info!("poll read");
+                info!("UnboundedReceiverReader: 接收器已关闭");
                 std::task::Poll::Ready(Ok(0)) // EOF
             }
-            std::task::Poll::Pending => std::task::Poll::Pending,
+            std::task::Poll::Pending => {
+                info!("UnboundedReceiverReader: 等待数据...");
+                std::task::Poll::Pending
+            }
         }
     }
 }
